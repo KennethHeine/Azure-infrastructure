@@ -2,5 +2,5 @@
   "$schema": "./repos.schema.json",
   "gitHubOrg": "KennethHeine",
   "location": "norwayeast",
-  "repos": ["chat-ai"]
+  "repos": ["chat-ai", "football-tournament"]
 }
