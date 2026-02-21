@@ -122,10 +122,19 @@ if (-not $spObjectId) {
         exit 1
     }
 
-    # Wait for replication
-    Start-Sleep -Seconds 5
-    $spObjectId = az ad sp list --display-name $ServicePrincipalName --query "[?appId=='$appId'].id | [0]" --output tsv --only-show-errors
-    Write-Host "  Created service principal (objectId: $spObjectId)" -ForegroundColor Green
+    # Retry loop to retrieve the SP objectId (replication delay)
+    for ($j = 1; $j -le 5; $j++) {
+        Start-Sleep -Seconds 5
+        $spObjectId = az ad sp list --display-name $ServicePrincipalName --query "[?appId=='$appId'].id | [0]" --output tsv --only-show-errors
+        if ($spObjectId) { break }
+        Write-Host "  Waiting for SP to replicate (attempt $j/5)..." -ForegroundColor Yellow
+    }
+
+    if (-not $spObjectId) {
+        Write-Host "  WARNING: Could not retrieve SP objectId, proceeding with appId" -ForegroundColor Yellow
+    } else {
+        Write-Host "  Created service principal (objectId: $spObjectId)" -ForegroundColor Green
+    }
 } else {
     Write-Host "  Service principal already exists (objectId: $spObjectId)" -ForegroundColor Yellow
 }
@@ -140,17 +149,27 @@ $existingRole = az role assignment list `
     --assignee $appId `
     --role "Owner" `
     --scope $rgScope `
-    --query "[0].id" --output tsv --only-show-errors
+    --query "[0].id" --output tsv --only-show-errors 2>&1
 
 if ($existingRole) {
     Write-Host "  Owner role already assigned" -ForegroundColor Yellow
 } else {
-    az role assignment create `
-        --assignee $appId `
-        --role "Owner" `
-        --scope $rgScope --only-show-errors | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Error: Failed to assign Owner role" -ForegroundColor Red
+    # Retry loop — SP may not have replicated to graph yet
+    $roleAssigned = $false
+    for ($r = 1; $r -le 5; $r++) {
+        az role assignment create `
+            --assignee $appId `
+            --role "Owner" `
+            --scope $rgScope --only-show-errors 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $roleAssigned = $true
+            break
+        }
+        Write-Host "  Role assignment attempt $r/5 failed, retrying in 10s..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 10
+    }
+    if (-not $roleAssigned) {
+        Write-Host "Error: Failed to assign Owner role after 5 attempts" -ForegroundColor Red
         exit 1
     }
     Write-Host "  Owner role assigned on $ResourceGroupName" -ForegroundColor Green
@@ -184,7 +203,8 @@ function Add-FederatedCredential {
 }
 "@
 
-    $tempFile = Join-Path $env:TEMP "fc-$Name.json"
+    $tempDir = [System.IO.Path]::GetTempPath()
+    $tempFile = Join-Path $tempDir "fc-$Name.json"
     $credJson | Out-File -FilePath $tempFile -Encoding utf8
 
     az ad app federated-credential create --id $AppId --parameters $tempFile --only-show-errors 2>&1 | Out-Null
