@@ -1,0 +1,6 @@
+{
+  "$schema": "./repos.schema.json",
+  "gitHubOrg": "KennethHeine",
+  "location": "norwayeast",
+  "repos": []
+}
