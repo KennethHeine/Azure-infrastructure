@@ -91,6 +91,8 @@ if ($appId) {
         exit 1
     }
     Write-Host "  Created app registration (appId: $appId)" -ForegroundColor Green
+    Write-Host "  Waiting for Azure AD replication..." -ForegroundColor Gray
+    Start-Sleep -Seconds 15
 }
 Write-Host ""
 
@@ -100,12 +102,27 @@ Write-Host "Step 3: Ensuring service principal exists..." -ForegroundColor Cyan
 $spObjectId = az ad sp list --display-name $ServicePrincipalName --query "[?appId=='$appId'].id | [0]" --output tsv --only-show-errors
 
 if (-not $spObjectId) {
-    az ad sp create --id $appId --only-show-errors | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Error: Failed to create service principal" -ForegroundColor Red
+    # Retry loop — Azure AD replication can take time after app registration creation
+    $maxRetries = 5
+    $retryDelay = 10
+    $created = $false
+
+    for ($i = 1; $i -le $maxRetries; $i++) {
+        az ad sp create --id $appId --only-show-errors 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $created = $true
+            break
+        }
+        Write-Host "  Attempt $i/$maxRetries failed, retrying in ${retryDelay}s..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $retryDelay
+    }
+
+    if (-not $created) {
+        Write-Host "Error: Failed to create service principal after $maxRetries attempts" -ForegroundColor Red
         exit 1
     }
-    # Wait a moment for replication
+
+    # Wait for replication
     Start-Sleep -Seconds 5
     $spObjectId = az ad sp list --display-name $ServicePrincipalName --query "[?appId=='$appId'].id | [0]" --output tsv --only-show-errors
     Write-Host "  Created service principal (objectId: $spObjectId)" -ForegroundColor Green
