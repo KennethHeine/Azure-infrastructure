@@ -125,24 +125,43 @@ $graphAppId = "00000003-0000-0000-c000-000000000000"
 # Application.ReadWrite.All app role ID (constant across all tenants)
 $appReadWriteAllId = "1bfefb4e-e0b5-418b-a88f-73c46d2cc8e9"
 
-# Add the API permission to the app registration
-az ad app permission add `
-    --id $appId `
-    --api $graphAppId `
-    --api-permissions "${appReadWriteAllId}=Role" --only-show-errors 2>&1 | Out-Null
+# Check if the permission is already configured on the app registration
+$existingPermissions = az ad app permission list --id $appId --only-show-errors --output json | ConvertFrom-Json
+$hasPermission = $existingPermissions | Where-Object { $_.resourceAppId -eq $graphAppId } |
+    ForEach-Object { $_.resourceAccess } |
+    Where-Object { $_.id -eq $appReadWriteAllId -and $_.type -eq "Role" }
 
-Write-Host "  API permission added to app registration" -ForegroundColor Green
-
-# Grant admin consent
-Write-Host "  Granting admin consent (requires Global Admin or Privileged Role Admin)..." -ForegroundColor Gray
-az ad app permission admin-consent --id $appId --only-show-errors 2>&1
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "  Admin consent granted" -ForegroundColor Green
+if ($hasPermission) {
+    Write-Host "  API permission Application.ReadWrite.All already configured" -ForegroundColor Yellow
 } else {
-    Write-Host "  WARNING: Admin consent failed. Ask a Global Admin to grant consent for" -ForegroundColor Red
-    Write-Host "  Application.ReadWrite.All on app '$ServicePrincipalName' ($appId)" -ForegroundColor Red
-    Write-Host "  Without this, the infra repo cannot create SPs for other repos." -ForegroundColor Red
+    az ad app permission add `
+        --id $appId `
+        --api $graphAppId `
+        --api-permissions "${appReadWriteAllId}=Role" --only-show-errors 2>&1 | Out-Null
+    Write-Host "  API permission added to app registration" -ForegroundColor Green
+}
+
+# Check if admin consent is already granted
+$grantedPermissions = az ad app permission list-grants --id $appId --only-show-errors --output json 2>&1
+$hasConsent = $false
+if ($LASTEXITCODE -eq 0 -and $grantedPermissions) {
+    $grants = $grantedPermissions | ConvertFrom-Json
+    $hasConsent = $grants | Where-Object { $_.resourceId -and $_.scope -match "Application.ReadWrite.All" }
+}
+
+if ($hasConsent) {
+    Write-Host "  Admin consent already granted" -ForegroundColor Yellow
+} else {
+    Write-Host "  Granting admin consent (requires Global Admin or Privileged Role Admin)..." -ForegroundColor Gray
+    az ad app permission admin-consent --id $appId --only-show-errors 2>&1
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Admin consent granted" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: Admin consent failed. Ask a Global Admin to grant consent for" -ForegroundColor Red
+        Write-Host "  Application.ReadWrite.All on app '$ServicePrincipalName' ($appId)" -ForegroundColor Red
+        Write-Host "  Without this, the infra repo cannot create SPs for other repos." -ForegroundColor Red
+    }
 }
 
 # ─── Step 5: Create federated credentials for THIS repo ─────────────
