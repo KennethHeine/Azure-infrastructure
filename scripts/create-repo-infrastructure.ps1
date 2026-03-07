@@ -208,14 +208,18 @@ function Add-FederatedCredential {
     $credJson | Out-File -FilePath $tempFile -Encoding utf8
 
     az ad app federated-credential create --id $AppId --parameters $tempFile --only-show-errors 2>&1 | Out-Null
+    $fcExitCode = $LASTEXITCODE
 
     Remove-Item -Path $tempFile -ErrorAction SilentlyContinue
 
-    if ($LASTEXITCODE -eq 0) {
+    if ($fcExitCode -eq 0) {
         Write-Host "  Created federated credential '$Name'" -ForegroundColor Green
     } else {
-        Write-Host "  Failed to create federated credential '$Name'" -ForegroundColor Red
+        Write-Host "  WARNING: Failed to create federated credential '$Name' (may already exist or replication delay)" -ForegroundColor Yellow
     }
+
+    # Reset LASTEXITCODE so it doesn't leak a stale non-zero value
+    $global:LASTEXITCODE = 0
 }
 
 # Federated credential for main branch
