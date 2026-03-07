@@ -4,6 +4,11 @@
 #   2. A Service Principal (sp-<repo>-github)
 #   3. Federated credentials for GitHub Actions OIDC (main branch + pull requests)
 #   4. Owner role assignment on the new RG for the repo's SP
+#   5. GitHub repository (private) with auto-delete head branches enabled
+#   6. Azure secrets (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID)
+#   7. Default README.md with infrastructure details
+#
+# Steps 5-7 require the AUTOMATION_GITHUB_TOKEN environment variable.
 #
 # Fully idempotent — safe to run multiple times.
 #
@@ -263,7 +268,7 @@ if (-not $ghToken) {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  Repository '$repoFullName' already exists" -ForegroundColor Yellow
     } else {
-        gh repo create $repoFullName --private --confirm 2>&1 | Out-Null
+        gh repo create $repoFullName --private 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Error: Failed to create repository '$repoFullName'" -ForegroundColor Red
             exit 1

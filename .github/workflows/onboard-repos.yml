@@ -22,6 +22,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Validate required secrets
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AUTOMATION_GITHUB_TOKEN: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
+        run: |
+          $missing = @()
+          if (-not $env:AZURE_CLIENT_ID) { $missing += 'AZURE_CLIENT_ID' }
+          if (-not $env:AZURE_TENANT_ID) { $missing += 'AZURE_TENANT_ID' }
+          if (-not $env:AZURE_SUBSCRIPTION_ID) { $missing += 'AZURE_SUBSCRIPTION_ID' }
+          if (-not $env:AUTOMATION_GITHUB_TOKEN) { $missing += 'AUTOMATION_GITHUB_TOKEN' }
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::Missing required secrets: $($missing -join ', ')"
+            exit 1
+          }
+          Write-Host "All required secrets are configured" -ForegroundColor Green
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -31,4 +50,6 @@ jobs:
 
       - name: Run onboarding for all repos
         shell: pwsh
+        env:
+          AUTOMATION_GITHUB_TOKEN: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
         run: ./scripts/process-repos.ps1 -ConfigFile ./repos.json
