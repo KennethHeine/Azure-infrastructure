@@ -104,6 +104,18 @@ resource cnameFodbold 'Microsoft.Network/dnsZones/CNAME@2018-05-01' = {
   }
 }
 
+// ─── CNAME: test-chat ────────────────────────────────────────────────
+resource cnameTestChat 'Microsoft.Network/dnsZones/CNAME@2018-05-01' = {
+  parent: dnsZone
+  name: 'test-chat'
+  properties: {
+    TTL: 3600
+    CNAMERecord: {
+      cname: 'ambitious-field-027ee2303.4.azurestaticapps.net'
+    }
+  }
+}
+
 // ─── Outputs ─────────────────────────────────────────────────────────
 output nameServers array = dnsZone.properties.nameServers
 output zoneId string = dnsZone.id
