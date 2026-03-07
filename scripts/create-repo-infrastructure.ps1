@@ -234,6 +234,73 @@ Add-FederatedCredential `
 
 Write-Host ""
 
+# ─── Step 6: Create GitHub Repository ────────────────────────────────
+Write-Host "Step 6: Creating GitHub repository '$GitHubOrg/$GitHubRepo'..." -ForegroundColor Cyan
+
+$ghToken = $env:AUTOMATION_GITHUB_TOKEN
+if (-not $ghToken) {
+    Write-Host "  WARNING: AUTOMATION_GITHUB_TOKEN not set — skipping GitHub repo creation, settings, and secrets" -ForegroundColor Yellow
+} else {
+    # Use GH_TOKEN for all gh CLI calls in this section
+    $env:GH_TOKEN = $ghToken
+
+    try {
+        $null = Get-Command gh -ErrorAction Stop
+    } catch {
+        Write-Host "Error: GitHub CLI (gh) is not installed." -ForegroundColor Red
+        Write-Host "Install it from: https://cli.github.com"
+        exit 1
+    }
+
+    $repoFullName = "$GitHubOrg/$GitHubRepo"
+
+    # Check if repo already exists
+    $repoExists = gh repo view $repoFullName --json name 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Repository '$repoFullName' already exists" -ForegroundColor Yellow
+    } else {
+        gh repo create $repoFullName --private --confirm 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Error: Failed to create repository '$repoFullName'" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "  Created repository '$repoFullName'" -ForegroundColor Green
+    }
+    Write-Host ""
+
+    # ─── Step 7: Enable auto-delete head branches ────────────────────
+    Write-Host "Step 7: Enabling 'Automatically delete head branches'..." -ForegroundColor Cyan
+
+    gh api --method PATCH "repos/$repoFullName" -f delete_branch_on_merge=true --silent 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Auto-delete head branches enabled" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: Failed to enable auto-delete head branches" -ForegroundColor Yellow
+    }
+    Write-Host ""
+
+    # ─── Step 8: Set Azure secrets on the repo ───────────────────────
+    Write-Host "Step 8: Setting Azure secrets on '$repoFullName'..." -ForegroundColor Cyan
+
+    $secrets = @{
+        "AZURE_CLIENT_ID"       = $appId
+        "AZURE_TENANT_ID"       = $tenantId
+        "AZURE_SUBSCRIPTION_ID" = $subscriptionId
+    }
+
+    foreach ($secret in $secrets.GetEnumerator()) {
+        Write-Host "  Setting $($secret.Key)..." -NoNewline
+        $secret.Value | gh secret set $secret.Key --repo $repoFullName 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host " done" -ForegroundColor Green
+        } else {
+            Write-Host " FAILED" -ForegroundColor Red
+            exit 1
+        }
+    }
+    Write-Host ""
+}
+
 # ─── Summary ─────────────────────────────────────────────────────────
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Onboarding Complete" -ForegroundColor Cyan
@@ -243,13 +310,10 @@ Write-Host "Resource Group:  $ResourceGroupName ($Location)" -ForegroundColor Gr
 Write-Host "SP App ID:       $appId" -ForegroundColor Green
 Write-Host "SP Object ID:    $spObjectId" -ForegroundColor Green
 Write-Host "Role:            Owner on $ResourceGroupName" -ForegroundColor Green
-Write-Host ""
-Write-Host "Add these secrets to the '$GitHubOrg/$GitHubRepo' GitHub repository:" -ForegroundColor Yellow
-Write-Host "  Settings > Secrets and variables > Actions > New repository secret"
-Write-Host ""
-Write-Host "  AZURE_CLIENT_ID:        $appId" -ForegroundColor Yellow
-Write-Host "  AZURE_TENANT_ID:        $tenantId" -ForegroundColor Yellow
-Write-Host "  AZURE_SUBSCRIPTION_ID:  $subscriptionId" -ForegroundColor Yellow
+if ($ghToken) {
+    Write-Host "GitHub Repo:     $repoFullName (private, auto-delete enabled)" -ForegroundColor Green
+    Write-Host "Secrets:         AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID" -ForegroundColor Green
+}
 Write-Host ""
 Write-Host "The SP has Owner role ONLY on resource group '$ResourceGroupName'." -ForegroundColor Cyan
 Write-Host "It cannot access resources in other resource groups." -ForegroundColor Cyan
