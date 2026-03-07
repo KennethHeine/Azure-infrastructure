@@ -18,7 +18,7 @@ param(
 
     [string]$GitHubOrg = "KennethHeine",
 
-    [string]$Location = "norwayeast"
+    [string]$Location = "westeurope"
 )
 
 $ErrorActionPreference = "Stop"
