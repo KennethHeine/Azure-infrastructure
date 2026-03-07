@@ -303,6 +303,81 @@ if (-not $ghToken) {
         }
     }
     Write-Host ""
+
+    # ─── Step 9: Create default README.md ────────────────────────────
+    Write-Host "Step 9: Creating default README.md in '$repoFullName'..." -ForegroundColor Cyan
+
+    $readmeContent = @"
+# $GitHubRepo
+
+## Azure Infrastructure
+
+This repository has been automatically onboarded with the following Azure resources:
+
+### Resource Group
+
+| Property | Value |
+|----------|-------|
+| Name | ``$ResourceGroupName`` |
+| Location | ``$Location`` |
+
+### Identity (Service Principal)
+
+| Property | Value |
+|----------|-------|
+| Name | ``$ServicePrincipalName`` |
+| App ID | ``$appId`` |
+| Role | Owner on ``$ResourceGroupName`` |
+
+The service principal uses **federated credentials (OIDC)** for passwordless authentication from GitHub Actions.
+
+### GitHub Actions Secrets
+
+The following secrets are already configured in this repository:
+
+| Secret | Description |
+|--------|-------------|
+| ``AZURE_CLIENT_ID`` | Service principal application ID |
+| ``AZURE_TENANT_ID`` | Azure AD tenant ID |
+| ``AZURE_SUBSCRIPTION_ID`` | Azure subscription ID |
+
+### Usage
+
+To authenticate with Azure in a GitHub Actions workflow:
+
+``````yaml
+permissions:
+  id-token: write
+  contents: read
+
+steps:
+  - uses: azure/login@v2
+    with:
+      client-id: `${{ secrets.AZURE_CLIENT_ID }}
+      tenant-id: `${{ secrets.AZURE_TENANT_ID }}
+      subscription-id: `${{ secrets.AZURE_SUBSCRIPTION_ID }}
+``````
+"@
+
+    # Check if README already exists
+    $readmeExists = gh api "repos/$repoFullName/contents/README.md" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  README.md already exists — skipping" -ForegroundColor Yellow
+    } else {
+        $readmeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($readmeContent))
+        $body = @{
+            message = "Initial README with Azure infrastructure details"
+            content = $readmeBase64
+        } | ConvertTo-Json -Compress
+
+        $body | gh api --method PUT "repos/$repoFullName/contents/README.md" --input - --silent 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  README.md created" -ForegroundColor Green
+        } else {
+            Write-Host "  WARNING: Failed to create README.md" -ForegroundColor Yellow
+        }
+    }
+    Write-Host ""
 }
 
 # ─── Summary ─────────────────────────────────────────────────────────
