@@ -14,14 +14,18 @@ on:
         required: true
         type: string
       confirm:
-        description: 'Type the repository name again to confirm deletion'
+        description: 'Type the repository name again to confirm teardown'
         required: true
         type: string
-      delete_github_repo:
-        description: 'Also delete the GitHub repository (needs delete_repo scope)'
-        required: false
-        type: boolean
-        default: false
+      github_repo:
+        description: 'What to do with the GitHub repo'
+        required: true
+        type: choice
+        default: keep
+        options:
+          - keep      # leave it untouched
+          - archive   # make it read-only (preserves the code)
+          - delete    # delete it permanently (needs delete_repo scope)
 
 permissions:
   id-token: write
@@ -87,6 +91,6 @@ jobs:
           $decomArgs = @{
             GitHubRepo          = '${{ inputs.name }}'
             SharedResourceGroup = $env:SHARED_RESOURCE_GROUP
+            GitHubRepoAction    = '${{ inputs.github_repo }}'
           }
-          if ('${{ inputs.delete_github_repo }}' -eq 'true') { $decomArgs['DeleteGitHubRepo'] = $true }
           ./scripts/decommission-repo.ps1 @decomArgs

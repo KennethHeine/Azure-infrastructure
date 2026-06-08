@@ -112,7 +112,8 @@ push triggers onboarding). Then watch **Onboard Repositories**.
 Run **Decommission Repo** (`decommission-repo.yml`) — you must type the repo name
 into `confirm`. It removes the repos.json entry and deletes `rg-<repo>`, the SP,
 **any Entra apps the SP owns (e.g. the Easy Auth app)**, the shared-ACR grants +
-image, and (if `delete_github_repo=true`) the GitHub repo.
+image, and — per the `github_repo` input — **keeps**, **archives** (read-only), or
+**deletes** the GitHub repo.
 
 ### Manually
 `pwsh ./scripts/process-repos.ps1 -ConfigFile ./repos.json` (needs `az login` +

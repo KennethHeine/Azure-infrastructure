@@ -9,7 +9,7 @@
 #      federated credentials + its rg-scoped role assignments)
 #   4. Deletes the resource group rg-<repo> (Container App, env, Log Analytics,
 #      managed identity, auth Entra app, etc.)
-#   5. (Optional) Deletes the GitHub repository
+#   5. (Optional) Archives (read-only) or deletes the GitHub repository
 #
 # Removing the entry from repos.json is handled by the decommission workflow,
 # not this script.
@@ -19,7 +19,8 @@
 #
 # Usage:
 #   .\scripts\decommission-repo.ps1 -GitHubRepo "my-app"
-#   .\scripts\decommission-repo.ps1 -GitHubRepo "my-app" -DeleteGitHubRepo
+#   .\scripts\decommission-repo.ps1 -GitHubRepo "my-app" -GitHubRepoAction archive
+#   .\scripts\decommission-repo.ps1 -GitHubRepo "my-app" -GitHubRepoAction delete
 
 [CmdletBinding()]
 param(
@@ -30,9 +31,12 @@ param(
 
     [string]$SharedResourceGroup = "rg-shared",
 
-    # Also delete the GitHub repository (needs AUTOMATION_GITHUB_TOKEN with
-    # delete_repo scope). Off by default — destructive and irreversible.
-    [switch]$DeleteGitHubRepo
+    # What to do with the GitHub repository after tearing down Azure:
+    #   keep    -> leave it untouched (default)
+    #   archive -> make it read-only (preserves the code; needs 'repo' scope)
+    #   delete  -> delete it permanently (needs 'delete_repo' scope)
+    [ValidateSet("keep", "archive", "delete")]
+    [string]$GitHubRepoAction = "keep"
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,7 +53,7 @@ Write-Host ""
 Write-Host "GitHub Repo:       $repoFullName"
 Write-Host "Resource Group:    $ResourceGroupName"
 Write-Host "Service Principal: $ServicePrincipalName"
-Write-Host "Delete GitHub repo: $DeleteGitHubRepo"
+Write-Host "GitHub repo action: $GitHubRepoAction"
 Write-Host ""
 
 # ─── Prerequisites ───────────────────────────────────────────────────
@@ -172,19 +176,30 @@ if ($rgExists -eq "true") {
 $global:LASTEXITCODE = 0
 Write-Host ""
 
-# ─── Step 5: (Optional) Delete the GitHub repository ─────────────────
-if ($DeleteGitHubRepo) {
-    Write-Host "Step 5: Deleting GitHub repository '$repoFullName'..." -ForegroundColor Cyan
+# ─── Step 5: Archive or delete the GitHub repository ─────────────────
+if ($GitHubRepoAction -ne "keep") {
+    Write-Host "Step 5: $($GitHubRepoAction)ing GitHub repository '$repoFullName'..." -ForegroundColor Cyan
     $ghToken = $env:AUTOMATION_GITHUB_TOKEN
     if (-not $ghToken) {
-        Write-Host "  WARNING: AUTOMATION_GITHUB_TOKEN not set — cannot delete GitHub repo" -ForegroundColor Yellow
+        Write-Host "  WARNING: AUTOMATION_GITHUB_TOKEN not set — cannot $GitHubRepoAction GitHub repo" -ForegroundColor Yellow
     } else {
         $env:GH_TOKEN = $ghToken
-        gh repo delete $repoFullName --yes 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  Deleted GitHub repository '$repoFullName'" -ForegroundColor Green
+        if ($GitHubRepoAction -eq "archive") {
+            # Make the repo read-only (preserves the code). Needs 'repo' scope.
+            gh api --method PATCH "repos/$repoFullName" -F archived=true --silent 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Archived GitHub repository '$repoFullName' (now read-only)" -ForegroundColor Green
+            } else {
+                Write-Host "  WARNING: Failed to archive '$repoFullName'" -ForegroundColor Yellow
+            }
         } else {
-            Write-Host "  WARNING: Failed to delete '$repoFullName' (token may lack the 'delete_repo' scope)" -ForegroundColor Yellow
+            # delete — permanent. Needs 'delete_repo' scope.
+            gh repo delete $repoFullName --yes 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Deleted GitHub repository '$repoFullName'" -ForegroundColor Green
+            } else {
+                Write-Host "  WARNING: Failed to delete '$repoFullName' (token may lack the 'delete_repo' scope)" -ForegroundColor Yellow
+            }
         }
         $global:LASTEXITCODE = 0
     }
@@ -197,8 +212,10 @@ Write-Host "Decommission Complete" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Removed: rg-$GitHubRepo, $ServicePrincipalName, shared-ACR grants + image" -ForegroundColor Green
-if (-not $DeleteGitHubRepo) {
-    Write-Host "The GitHub repository '$repoFullName' was kept (re-run with -DeleteGitHubRepo to remove it)." -ForegroundColor Cyan
+switch ($GitHubRepoAction) {
+    "keep"    { Write-Host "The GitHub repository '$repoFullName' was kept." -ForegroundColor Cyan }
+    "archive" { Write-Host "The GitHub repository '$repoFullName' was archived (read-only)." -ForegroundColor Cyan }
+    "delete"  { Write-Host "The GitHub repository '$repoFullName' was deleted." -ForegroundColor Cyan }
 }
 Write-Host "Remember to remove '$GitHubRepo' from repos.json (the workflow does this)." -ForegroundColor Cyan
 Write-Host ""
