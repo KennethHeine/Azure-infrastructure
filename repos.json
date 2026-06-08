@@ -7,6 +7,11 @@
     "football-tournament",
     "test-chat",
     "fodboldturnering",
-    "test-repo"
+    "test-repo",
+    {
+      "name": "ca-fulltest",
+      "template": "container-app",
+      "auth": true
+    }
   ]
 }
