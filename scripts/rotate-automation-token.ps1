@@ -45,9 +45,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Pre-filled token creation URL: classic PAT with the scopes Step 6+ needs
-# (repo = create repos + set Actions secrets; workflow = manage workflow files).
-$createUrl = "https://github.com/settings/tokens/new?scopes=repo,workflow&description=Azure-infrastructure%20automation"
+# Pre-filled token creation URL: classic PAT with the scopes onboarding needs.
+#   repo        -> create repos, set Actions secrets/variables
+#   workflow    -> manage workflow files
+#   delete_repo -> let the Decommission Repo workflow delete the GitHub repo
+$createUrl = "https://github.com/settings/tokens/new?scopes=repo,workflow,delete_repo&description=Azure-infrastructure%20automation"
 
 # gh CLI required
 try {
@@ -71,7 +73,7 @@ if (-not $NewToken) {
     Write-Host ""
     Write-Host "No token supplied. Create a new one, then re-run this script." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "1. Create a classic PAT with the 'repo' and 'workflow' scopes:" -ForegroundColor Cyan
+    Write-Host "1. Create a classic PAT with the 'repo', 'workflow', and 'delete_repo' scopes:" -ForegroundColor Cyan
     Write-Host "   $createUrl"
     Write-Host ""
     Write-Host "   (Fine-grained alternative: grant Administration + Contents + Secrets" -ForegroundColor Gray
