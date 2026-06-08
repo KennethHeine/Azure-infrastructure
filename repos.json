@@ -5,6 +5,11 @@
   "repos": [
     "chat-ai",
     "football-tournament",
-    "test-repo"
+    "test-repo",
+    {
+      "name": "article-to-speech",
+      "template": "container-app",
+      "auth": true
+    }
   ]
 }
