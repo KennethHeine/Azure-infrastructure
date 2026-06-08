@@ -1,0 +1,103 @@
+name: Add Repo
+
+# One-click onboarding: pick a name + template, and this adds the entry to
+# repos.json and pushes to main — which triggers the Onboard Repositories
+# workflow to create the Azure footprint and scaffold the GitHub repo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Repository name (derives rg-<name>, sp-<name>-github)'
+        required: true
+        type: string
+      template:
+        description: 'Starter template'
+        required: true
+        type: choice
+        default: container-app
+        options:
+          - container-app
+          - static-web
+          - none
+      location:
+        description: 'Azure region (must match the existing location in repos.json)'
+        required: false
+        type: string
+        default: norwayeast
+      auth:
+        description: 'container-app only: enable Entra built-in auth'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  add:
+    name: Add repo to config
+    runs-on: ubuntu-latest
+    steps:
+      # Check out with the automation PAT so the commit we push triggers the
+      # Onboard Repositories workflow. (Pushes made with the default GITHUB_TOKEN
+      # do NOT trigger other workflows.)
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
+
+      - name: Add entry to repos.json
+        shell: bash
+        env:
+          NAME: ${{ inputs.name }}
+          TEMPLATE: ${{ inputs.template }}
+          AUTH: ${{ inputs.auth }}
+        run: |
+          set -euo pipefail
+
+          # Validate the repo name (GitHub repo + Azure resource naming).
+          if ! [[ "$NAME" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "::error::Invalid repo name '$NAME' (allowed: letters, digits, . _ -)"
+            exit 1
+          fi
+
+          # Build the new entry: plain string for 'none', object otherwise.
+          if [ "$TEMPLATE" = "none" ]; then
+            ENTRY=$(jq -n --arg name "$NAME" '$name')
+          elif [ "$TEMPLATE" = "container-app" ]; then
+            ENTRY=$(jq -n --arg name "$NAME" --arg t "$TEMPLATE" --argjson auth "$AUTH" \
+              '{name:$name, template:$t, auth:$auth}')
+          else
+            ENTRY=$(jq -n --arg name "$NAME" --arg t "$TEMPLATE" '{name:$name, template:$t}')
+          fi
+
+          # Append idempotently — skip if a repo with this name already exists.
+          jq --argjson entry "$ENTRY" --arg name "$NAME" '
+            if any(.repos[]; (if type=="string" then . else .name end) == $name)
+            then .
+            else .repos += [$entry] end
+          ' repos.json > repos.tmp
+          mv repos.tmp repos.json
+
+          echo "Resulting repos.json:"
+          cat repos.json
+
+      - name: Commit and push (triggers onboarding)
+        shell: bash
+        env:
+          NAME: ${{ inputs.name }}
+          TEMPLATE: ${{ inputs.template }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add repos.json
+          if git diff --cached --quiet; then
+            echo "::notice::'$NAME' is already in repos.json — nothing to do."
+            exit 0
+          fi
+          git commit -m "Add '$NAME' ($TEMPLATE) to repos list"
+          git push
+          echo "### Onboarding triggered for \`$NAME\` ($TEMPLATE)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Watch the **Onboard Repositories** workflow for progress." >> "$GITHUB_STEP_SUMMARY"
