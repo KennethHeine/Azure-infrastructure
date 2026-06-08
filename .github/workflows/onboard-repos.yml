@@ -41,6 +41,16 @@ jobs:
           }
           Write-Host "All required secrets are configured" -ForegroundColor Green
 
+      - name: Validate automation token
+        shell: pwsh
+        env:
+          AUTOMATION_GITHUB_TOKEN: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
+        run: ./scripts/test-automation-token.ps1
+        # Fails the run early with a clear ::error:: if AUTOMATION_GITHUB_TOKEN
+        # is expired, revoked, or under-scoped — instead of a cryptic
+        # "Failed to create repository" later in Step 6. Rotate the token with
+        # scripts/rotate-automation-token.ps1.
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:

@@ -267,16 +267,27 @@ if (-not $ghToken) {
     $repoFullName = "$GitHubOrg/$GitHubRepo"
 
     # Check if repo already exists
-    $repoExists = gh repo view $repoFullName --json name 2>&1
+    $repoView = gh repo view $repoFullName --json name 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  Repository '$repoFullName' already exists" -ForegroundColor Yellow
-    } else {
-        gh repo create $repoFullName --private 2>&1 | Out-Null
+    } elseif ("$repoView" -match 'Could not resolve to a Repository|Not Found') {
+        # Repo genuinely doesn't exist yet — create it.
+        $createOutput = gh repo create $repoFullName --private 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Error: Failed to create repository '$repoFullName'" -ForegroundColor Red
+            Write-Host "  gh: $createOutput" -ForegroundColor Red
             exit 1
         }
         Write-Host "  Created repository '$repoFullName'" -ForegroundColor Green
+    } else {
+        # A non-"not found" failure on a read call is almost always a bad token
+        # (expired, revoked, or missing the 'repo' scope). Surface it clearly
+        # instead of misreporting it as a failed repository creation.
+        Write-Host "Error: Could not query repository '$repoFullName' — AUTOMATION_GITHUB_TOKEN may be invalid, expired, or lack the 'repo' scope" -ForegroundColor Red
+        Write-Host "  gh: $repoView" -ForegroundColor Red
+        Write-Host "  Validate it:  ./scripts/test-automation-token.ps1" -ForegroundColor Red
+        Write-Host "  Rotate it:    ./scripts/rotate-automation-token.ps1" -ForegroundColor Red
+        exit 1
     }
     Write-Host ""
 
