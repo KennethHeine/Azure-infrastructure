@@ -7,8 +7,11 @@
 #   5. GitHub repository (private) with auto-delete head branches enabled
 #   6. Azure secrets (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID)
 #   7. Default README.md with infrastructure details
+#   8. Agent guide files (AGENTS.md + CLAUDE.md) describing the Azure setup and
+#      the convention to build Bicep and deploy via GitHub Actions workflows
 #
-# Steps 5-7 require the AUTOMATION_GITHUB_TOKEN environment variable.
+# The GitHub steps (repo, secrets, README, agent files) require the
+# AUTOMATION_GITHUB_TOKEN environment variable.
 #
 # Fully idempotent — safe to run multiple times.
 #
@@ -383,6 +386,155 @@ steps:
         }
     }
     Write-Host ""
+
+    # ─── Step 10: Create agent guide files (AGENTS.md + CLAUDE.md) ────
+    Write-Host "Step 10: Creating agent guide files in '$repoFullName'..." -ForegroundColor Cyan
+
+    # Creates a file via the GitHub contents API only if it does not already
+    # exist, so existing repos are backfilled and existing files are never
+    # overwritten. Idempotent — safe to run on every onboarding pass.
+    function Set-RepoFileIfMissing {
+        param(
+            [string]$RepoFullName,
+            [string]$Path,
+            [string]$Content,
+            [string]$CommitMessage
+        )
+
+        $exists = gh api "repos/$RepoFullName/contents/$Path" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  $Path already exists — skipping" -ForegroundColor Yellow
+            $global:LASTEXITCODE = 0
+            return
+        }
+
+        $base64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($Content))
+        $body = @{
+            message = $CommitMessage
+            content = $base64
+        } | ConvertTo-Json -Compress
+
+        $body | gh api --method PUT "repos/$RepoFullName/contents/$Path" --input - --silent 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  $Path created" -ForegroundColor Green
+        } else {
+            Write-Host "  WARNING: Failed to create $Path" -ForegroundColor Yellow
+        }
+
+        # Reset LASTEXITCODE so a stale non-zero value doesn't leak out
+        $global:LASTEXITCODE = 0
+    }
+
+    $agentsContent = @"
+# $GitHubRepo — Agent Guide
+
+This file gives AI coding agents (and humans) the context needed to work in this
+repository. It was seeded automatically when the repo was onboarded by the
+central **Azure-infrastructure** repo.
+
+## Azure infrastructure
+
+This repo has a dedicated, isolated Azure footprint:
+
+| Property | Value |
+|----------|-------|
+| Resource Group | ``$ResourceGroupName`` |
+| Location | ``$Location`` |
+| Identity (Service Principal) | ``$ServicePrincipalName`` |
+| App ID | ``$appId`` |
+| Permissions | **Owner** on ``$ResourceGroupName`` only |
+
+Authentication is **passwordless OIDC** (federated credentials) — no Azure
+passwords or client secrets are stored. The service principal can only touch its
+own resource group ``$ResourceGroupName``; it has no access to any other
+resources in the subscription.
+
+These GitHub Actions secrets are already configured on the repo:
+
+| Secret | Description |
+|--------|-------------|
+| ``AZURE_CLIENT_ID`` | Service principal application ID |
+| ``AZURE_TENANT_ID`` | Azure AD tenant ID |
+| ``AZURE_SUBSCRIPTION_ID`` | Azure subscription ID |
+
+## How to build and deploy Azure resources
+
+When this project needs Azure resources, follow this pattern:
+
+1. **Author infrastructure as Bicep.** Put Bicep templates under an ``infra/``
+   folder and define every resource declaratively. Do not create resources by
+   hand in the portal or with ad-hoc CLI commands.
+2. **Scope everything to this repo's resource group** (``$ResourceGroupName``).
+   The service principal is Owner there and nowhere else, so deployments must
+   target that resource group.
+3. **Deploy via GitHub Actions workflows**, never manually — OIDC login followed
+   by a Bicep/ARM deploy step.
+
+### Reference deploy workflow
+
+``````yaml
+name: Deploy infrastructure
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['infra/**']
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: `${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: `${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: `${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/arm-deploy@v2
+        with:
+          scope: resourcegroup
+          resourceGroupName: $ResourceGroupName
+          template: ./infra/main.bicep
+          deploymentName: deploy-`${{ github.run_number }}
+``````
+
+## Conventions for agents
+
+- Prefer **Bicep** over Terraform or raw ARM JSON for this estate.
+- Keep deployments **idempotent** and **scoped to ``$ResourceGroupName``**.
+- Never introduce stored Azure credentials — always use the existing OIDC secrets.
+- Document any new resources you add in this repo's README.
+"@
+
+    Set-RepoFileIfMissing `
+        -RepoFullName $repoFullName `
+        -Path "AGENTS.md" `
+        -Content $agentsContent `
+        -CommitMessage "Add AGENTS.md with Azure infrastructure and deployment guidance"
+
+    $claudeContent = @"
+# $GitHubRepo
+
+See **[AGENTS.md](./AGENTS.md)** for the full agent guide.
+
+It documents this repository's Azure infrastructure (resource group
+``$ResourceGroupName``, the OIDC service principal ``$ServicePrincipalName``, and
+the configured ``AZURE_*`` secrets) and the convention to build Azure resources
+as **Bicep** and deploy them via **GitHub Actions workflows**.
+"@
+
+    Set-RepoFileIfMissing `
+        -RepoFullName $repoFullName `
+        -Path "CLAUDE.md" `
+        -Content $claudeContent `
+        -CommitMessage "Add CLAUDE.md pointing to AGENTS.md"
+
+    Write-Host ""
 }
 
 # ─── Summary ─────────────────────────────────────────────────────────
@@ -397,6 +549,7 @@ Write-Host "Role:            Owner on $ResourceGroupName" -ForegroundColor Green
 if ($ghToken) {
     Write-Host "GitHub Repo:     $repoFullName (private, auto-delete enabled)" -ForegroundColor Green
     Write-Host "Secrets:         AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID" -ForegroundColor Green
+    Write-Host "Agent files:     AGENTS.md, CLAUDE.md" -ForegroundColor Green
 }
 Write-Host ""
 Write-Host "The SP has Owner role ONLY on resource group '$ResourceGroupName'." -ForegroundColor Cyan

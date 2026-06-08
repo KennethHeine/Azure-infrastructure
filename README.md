@@ -99,6 +99,12 @@ After the workflow runs, check the logs for the output values and add these secr
 | Service Principal | — | Linked to the app registration |
 | Federated Credentials | — | OIDC trust for `main` branch + pull requests |
 | Role Assignment | — | **Owner** on the repo's Resource Group only |
+| GitHub Repo | `<org>/<repo>` | Private, auto-delete merged branches (needs `AUTOMATION_GITHUB_TOKEN`) |
+| Repo Secrets | — | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` |
+| `README.md` | — | Seeded with the repo's infrastructure details |
+| `AGENTS.md` + `CLAUDE.md` | — | Agent guide: Azure setup + "build Bicep, deploy via workflows" convention |
+
+> The GitHub repo, secrets, README, and agent files are created only when `AUTOMATION_GITHUB_TOKEN` is set. All file seeding is idempotent and **only adds files that don't already exist**, so re-running backfills `AGENTS.md`/`CLAUDE.md` into already-onboarded repos without overwriting anything.
 
 ## Scripts
 
