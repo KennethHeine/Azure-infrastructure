@@ -1,0 +1,92 @@
+name: Decommission Repo
+
+# Tears down a repo's entire footprint: removes it from repos.json, deletes its
+# resource group, service principal, shared-ACR grants + image, and (optionally)
+# the GitHub repository itself.
+#
+# Destructive and irreversible — you must type the repo name into `confirm`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Repository name to decommission'
+        required: true
+        type: string
+      confirm:
+        description: 'Type the repository name again to confirm deletion'
+        required: true
+        type: string
+      delete_github_repo:
+        description: 'Also delete the GitHub repository (needs delete_repo scope)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+  SHARED_RESOURCE_GROUP: rg-shared
+
+jobs:
+  decommission:
+    name: Decommission repo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation
+        shell: bash
+        env:
+          NAME: ${{ inputs.name }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$NAME" != "$CONFIRM" ]; then
+            echo "::error::Confirmation '$CONFIRM' does not match repo name '$NAME'. Aborting."
+            exit 1
+          fi
+          echo "Confirmed decommission of '$NAME'."
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
+
+      - name: Remove entry from repos.json
+        shell: bash
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          jq --arg name "$NAME" '
+            .repos |= map(select((if type=="string" then . else .name end) != $name))
+          ' repos.json > repos.tmp
+          mv repos.tmp repos.json
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add repos.json
+          if git diff --cached --quiet; then
+            echo "::notice::'$NAME' was not in repos.json."
+          else
+            git commit -m "Decommission '$NAME': remove from repos list"
+            git push
+          fi
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Tear down Azure + GitHub resources
+        shell: pwsh
+        env:
+          AUTOMATION_GITHUB_TOKEN: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
+        run: |
+          $decomArgs = @{
+            GitHubRepo          = '${{ inputs.name }}'
+            SharedResourceGroup = $env:SHARED_RESOURCE_GROUP
+          }
+          if ('${{ inputs.delete_github_repo }}' -eq 'true') { $decomArgs['DeleteGitHubRepo'] = $true }
+          ./scripts/decommission-repo.ps1 @decomArgs

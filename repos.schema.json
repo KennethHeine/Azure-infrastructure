@@ -14,10 +14,36 @@
     },
     "repos": {
       "type": "array",
-      "description": "List of repository names to onboard",
+      "description": "Repositories to onboard. Each entry is either a plain name (empty repo, no template) or an object selecting a starter template.",
       "items": {
-        "type": "string",
-        "description": "Repository name (used to derive rg-<name> and sp-<name>-github)"
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Repository name (empty repo). Derives rg-<name> and sp-<name>-github."
+          },
+          {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Repository name (derives rg-<name> and sp-<name>-github)"
+              },
+              "template": {
+                "type": "string",
+                "enum": ["none", "container-app", "static-web"],
+                "default": "none",
+                "description": "Starter template the repo is scaffolded from (GitHub template repository)"
+              },
+              "auth": {
+                "type": "boolean",
+                "default": true,
+                "description": "container-app only: enable Entra built-in auth (Easy Auth). Default true."
+              }
+            }
+          }
+        ]
       }
     }
   }

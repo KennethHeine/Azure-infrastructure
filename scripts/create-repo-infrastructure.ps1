@@ -26,7 +26,21 @@ param(
 
     [string]$GitHubOrg = "KennethHeine",
 
-    [string]$Location = "westeurope"
+    [string]$Location = "westeurope",
+
+    # Starter template the new repo is scaffolded from (GitHub template repo).
+    #   none          -> empty repo (legacy behaviour)
+    #   container-app -> KennethHeine/template-container-app
+    #   static-web    -> KennethHeine/template-static-web
+    [ValidateSet("none", "container-app", "static-web")]
+    [string]$Template = "none",
+
+    # For container-app repos: enable Entra built-in auth by default. Surfaced as
+    # a repo variable so the app's Bicep/workflows can read it.
+    [bool]$EnableAuth = $true,
+
+    # Resource group that holds the shared ACR (see shared/main.bicep).
+    [string]$SharedResourceGroup = "rg-shared"
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +48,12 @@ $ErrorActionPreference = "Stop"
 # ─── Derive names from repo ──────────────────────────────────────────
 $ResourceGroupName = "rg-$GitHubRepo"
 $ServicePrincipalName = "sp-$GitHubRepo-github"
+
+# Maps the -Template value to its GitHub template repository.
+$templateRepoMap = @{
+    "container-app" = "$GitHubOrg/template-container-app"
+    "static-web"    = "$GitHubOrg/template-static-web"
+}
 
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Onboard Repository Infrastructure" -ForegroundColor Cyan
@@ -43,6 +63,8 @@ Write-Host "GitHub Repo:       $GitHubOrg/$GitHubRepo"
 Write-Host "Resource Group:    $ResourceGroupName"
 Write-Host "Location:          $Location"
 Write-Host "Service Principal: $ServicePrincipalName"
+Write-Host "Template:          $Template"
+if ($Template -eq "container-app") { Write-Host "Entra auth:        $EnableAuth" }
 Write-Host ""
 
 # ─── Prerequisites ───────────────────────────────────────────────────
@@ -184,6 +206,88 @@ if ($existingRole) {
 }
 Write-Host ""
 
+# ─── Step 4b: Grant access to the shared Container Registry ──────────
+# Idempotently assign a role (optionally with an ABAC condition) to the SP.
+function Grant-RoleIfMissing {
+    param(
+        [string]$Assignee,
+        [string]$RoleId,
+        [string]$Scope,
+        [string]$Description,
+        [string]$Condition
+    )
+
+    $existing = az role assignment list --assignee $Assignee --role $RoleId --scope $Scope `
+        --query "[0].id" --output tsv --only-show-errors 2>&1
+    if ($existing) {
+        Write-Host "  $Description already assigned" -ForegroundColor Yellow
+        $global:LASTEXITCODE = 0
+        return
+    }
+
+    $assigned = $false
+    for ($i = 1; $i -le 5; $i++) {
+        if ($Condition) {
+            az role assignment create --assignee $Assignee --role $RoleId --scope $Scope `
+                --condition $Condition --condition-version "2.0" --only-show-errors 2>&1 | Out-Null
+        } else {
+            az role assignment create --assignee $Assignee --role $RoleId --scope $Scope `
+                --only-show-errors 2>&1 | Out-Null
+        }
+        if ($LASTEXITCODE -eq 0) { $assigned = $true; break }
+        Start-Sleep -Seconds 8
+    }
+
+    if ($assigned) {
+        Write-Host "  Granted: $Description" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: Failed to grant $Description (retried 5x)" -ForegroundColor Yellow
+    }
+    $global:LASTEXITCODE = 0
+}
+
+# Container-app repos push images to the shared ACR, and their Container App's
+# managed identity pulls from it. Grant the repo's SP:
+#   - AcrPush                                  -> push images (deploy-app workflow)
+#   - Role Based Access Control Administrator  -> constrained by an ABAC condition
+#       to ONLY assign the AcrPull role, so the app's own deploy can grant its
+#       Container App managed identity pull access — and nothing more. This is the
+#       Microsoft-recommended least-privilege delegation (RBAC Admin + condition,
+#       not the broader User Access Administrator).
+$acrName = $null
+$acrLoginServer = $null
+if ($Template -eq "container-app") {
+    Write-Host "Step 4b: Granting shared ACR access to the service principal..." -ForegroundColor Cyan
+
+    $acrJson = az acr list --resource-group $SharedResourceGroup `
+        --query "[0].{name:name,id:id,loginServer:loginServer}" --output json --only-show-errors 2>&1
+    if ($LASTEXITCODE -ne 0 -or -not $acrJson -or "$acrJson".Trim() -in @("", "null", "[]")) {
+        Write-Host "  WARNING: No shared ACR found in '$SharedResourceGroup'." -ForegroundColor Yellow
+        Write-Host "  Run the 'Deploy Shared Infrastructure' workflow first; ACR grants skipped for now." -ForegroundColor Yellow
+        $global:LASTEXITCODE = 0
+    } else {
+        $acr = $acrJson | ConvertFrom-Json
+        $acrName = $acr.name
+        $acrLoginServer = $acr.loginServer
+        $acrId = $acr.id
+
+        $acrPushRoleId  = "8311e382-0749-4cb8-b61a-304f252e45ec"  # AcrPush
+        $rbacAdminRoleId = "f58310d9-a9f6-439a-9e8d-f62e7b41a168" # Role Based Access Control Administrator
+        $acrPullRoleId  = "7f951dda-4ed3-4680-a7ca-43fe172d538d"  # AcrPull
+
+        Grant-RoleIfMissing -Assignee $appId -RoleId $acrPushRoleId -Scope $acrId `
+            -Description "AcrPush on shared ACR ($acrName)"
+
+        # ABAC condition: only allow creating/deleting role assignments for AcrPull.
+        $acrPullCondition = "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals{$acrPullRoleId})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals{$acrPullRoleId}))"
+        Grant-RoleIfMissing -Assignee $appId -RoleId $rbacAdminRoleId -Scope $acrId `
+            -Description "Constrained RBAC Admin (AcrPull-only) on shared ACR" -Condition $acrPullCondition
+
+        Write-Host "  Shared ACR: $acrLoginServer" -ForegroundColor Green
+    }
+    Write-Host ""
+}
+
 # ─── Step 5: Create Federated Credentials ────────────────────────────
 Write-Host "Step 5: Creating federated credentials..." -ForegroundColor Cyan
 
@@ -271,8 +375,15 @@ if (-not $ghToken) {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  Repository '$repoFullName' already exists" -ForegroundColor Yellow
     } elseif ("$repoView" -match 'Could not resolve to a Repository|Not Found') {
-        # Repo genuinely doesn't exist yet — create it.
-        $createOutput = gh repo create $repoFullName --private 2>&1
+        # Repo genuinely doesn't exist yet — create it, optionally scaffolded
+        # from a GitHub template repository.
+        $createArgs = @($repoFullName, '--private')
+        if ($Template -ne 'none') {
+            $templateRepo = $templateRepoMap[$Template]
+            $createArgs += @('--template', $templateRepo)
+            Write-Host "  Scaffolding from template '$templateRepo'" -ForegroundColor Gray
+        }
+        $createOutput = gh repo create @createArgs 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Error: Failed to create repository '$repoFullName'" -ForegroundColor Red
             Write-Host "  gh: $createOutput" -ForegroundColor Red
@@ -322,6 +433,46 @@ if (-not $ghToken) {
         }
     }
     Write-Host ""
+
+    # ─── Step 8b: Set Actions variables the template workflows consume ───
+    Write-Host "Step 8b: Setting Actions variables on '$repoFullName'..." -ForegroundColor Cyan
+
+    # Non-secret config the template's deploy workflows read via ${{ vars.* }}.
+    $variables = [ordered]@{
+        "RESOURCE_GROUP" = $ResourceGroupName
+    }
+    if ($Template -eq "container-app") {
+        $variables["ENABLE_AUTH"] = "$EnableAuth".ToLower()
+        if ($acrName) {
+            $variables["ACR_NAME"]           = $acrName
+            $variables["ACR_LOGIN_SERVER"]   = $acrLoginServer
+            $variables["ACR_RESOURCE_GROUP"] = $SharedResourceGroup
+        } else {
+            Write-Host "  NOTE: shared ACR not found earlier — ACR_* variables not set. Re-run after deploying the shared ACR." -ForegroundColor Yellow
+        }
+    }
+
+    foreach ($v in $variables.GetEnumerator()) {
+        Write-Host "  Setting $($v.Key)=$($v.Value)..." -NoNewline
+        gh variable set $v.Key --repo $repoFullName --body "$($v.Value)" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host " done" -ForegroundColor Green
+        } else {
+            Write-Host " WARNING (continuing)" -ForegroundColor Yellow
+        }
+        $global:LASTEXITCODE = 0
+    }
+    Write-Host ""
+
+    # ─── Steps 9-10: Seed README + agent guide files ────────────────
+    # Skipped for templated repos: the template repository already ships its
+    # own README.md, AGENTS.md, and CLAUDE.md (and template copy is async, so
+    # seeding here would race the copy). Only empty (-Template none) repos get
+    # the generic onboarding docs below.
+    if ($Template -ne 'none') {
+        Write-Host "Steps 9-10: Skipped (template '$Template' provides its own README/agent files)" -ForegroundColor Yellow
+        Write-Host ""
+    } else {
 
     # ─── Step 9: Create default README.md ────────────────────────────
     Write-Host "Step 9: Creating default README.md in '$repoFullName'..." -ForegroundColor Cyan
@@ -546,6 +697,7 @@ as **Bicep** and deploy them via **GitHub Actions workflows**.
         -CommitMessage "Add CLAUDE.md pointing to AGENTS.md"
 
     Write-Host ""
+    }  # end Steps 9-10 (empty-repo doc seeding)
 }
 
 # ─── Summary ─────────────────────────────────────────────────────────

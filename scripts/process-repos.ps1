@@ -69,14 +69,27 @@ $successCount = 0
 $failCount = 0
 $results = @()
 
-foreach ($repoName in $repos) {
+foreach ($repoEntry in $repos) {
+    # Each repos.json entry is either a plain string (legacy: empty repo, no
+    # template) or an object { name, template, auth }.
+    if ($repoEntry -is [string]) {
+        $repoName   = $repoEntry
+        $template   = 'none'
+        $enableAuth = $true
+    } else {
+        $repoName   = $repoEntry.name
+        $template   = if ($repoEntry.template) { $repoEntry.template } else { 'none' }
+        $enableAuth = if ($null -ne $repoEntry.auth) { [bool]$repoEntry.auth } else { $true }
+    }
+
     Write-Host "=========================================" -ForegroundColor Magenta
-    Write-Host "Processing: $repoName" -ForegroundColor Magenta
+    Write-Host "Processing: $repoName  (template: $template)" -ForegroundColor Magenta
     Write-Host "=========================================" -ForegroundColor Magenta
     Write-Host ""
 
     try {
-        & $onboardScript -GitHubRepo $repoName -GitHubOrg $gitHubOrg -Location $location
+        & $onboardScript -GitHubRepo $repoName -GitHubOrg $gitHubOrg -Location $location `
+            -Template $template -EnableAuth $enableAuth
         if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
             throw "Script exited with code $LASTEXITCODE"
         }
