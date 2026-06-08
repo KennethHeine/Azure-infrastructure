@@ -52,7 +52,7 @@ Onboarding is **idempotent** — re-running never duplicates resources.
 
 | Template | Repo | What you get |
 |----------|------|--------------|
-| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, image pull from the **shared ACR via a user-assigned managed identity**, secret-less **Entra Easy Auth** (default on, token store enabled), `deploy-infra` + `deploy-app` workflows |
+| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, image pull from the **shared ACR via a user-assigned managed identity** (the `deploy-infra` workflow creates the identity and grants it AcrPull), secret-less **Entra Easy Auth** (default on), `deploy-infra` + `deploy-app` workflows. `deploy-app` builds + pushes the image on the runner and updates the app. |
 | `static-web` | [`KennethHeine/template-static-web`](https://github.com/KennethHeine/template-static-web) | Next.js static export → **Azure Static Web Apps**, open/public, `deploy-infra` + `deploy` (prod + PR preview) workflows |
 
 New repos are created with `gh repo create --template`. Templated repos keep
@@ -79,6 +79,24 @@ Access model (least-privilege, validated against Microsoft Learn):
 > This registry uses the classic RBAC mode where the familiar roles work. Revisit
 > if/when migrating.
 
+## Entra Easy Auth (container-app repos)
+
+Container-app repos with `auth: true` get secret-less **Entra built-in auth**. The
+auth Entra application is created **at deploy time** by the repo's own
+`deploy-infra` workflow via the Microsoft Graph Bicep extension, authenticated by
+the Container App's managed identity (federated credential — no client secret).
+
+For a repo's SP to create that app, it needs the Microsoft Graph
+**`Application.ReadWrite.OwnedBy`** permission. Onboarding grants it automatically
+(Step 5b of `create-repo-infrastructure.ps1`). That works because the central
+onboarding SP holds **`AppRoleAssignment.ReadWrite.All`** (granted by
+`setup-service-principal.ps1`), which lets it delegate app roles to repo SPs.
+
+So the chain is: `setup-service-principal.ps1` → onboarding SP can grant app roles
+→ onboarding grants each auth repo's SP `Application.ReadWrite.OwnedBy` → that repo's
+deploy creates its own Easy Auth app. The Easy Auth **token store is not enabled**
+(it requires a backing blob-storage SAS URL this template doesn't provision).
+
 ## Operating it
 
 ### Add a repo (preferred: the workflow)
@@ -93,7 +111,8 @@ push triggers onboarding). Then watch **Onboard Repositories**.
 ### Decommission a repo
 Run **Decommission Repo** (`decommission-repo.yml`) — you must type the repo name
 into `confirm`. It removes the repos.json entry and deletes `rg-<repo>`, the SP,
-the shared-ACR grants + image, and (if `delete_github_repo=true`) the GitHub repo.
+**any Entra apps the SP owns (e.g. the Easy Auth app)**, the shared-ACR grants +
+image, and (if `delete_github_repo=true`) the GitHub repo.
 
 ### Manually
 `pwsh ./scripts/process-repos.ps1 -ConfigFile ./repos.json` (needs `az login` +
@@ -120,7 +139,12 @@ URL, validates, writes the secret, optionally re-runs onboarding).
 ## Required secrets (on this repo)
 
 `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (the central
-subscription-Owner SP used for onboarding/teardown), and `AUTOMATION_GITHUB_TOKEN`.
+onboarding SP `sp-azure-infrastructure-github`), and `AUTOMATION_GITHUB_TOKEN`.
+
+The onboarding SP (configured by `setup-service-principal.ps1`) has: **Owner** on
+the subscription, and Microsoft Graph **`Application.ReadWrite.All`** (create repo
+SPs) + **`AppRoleAssignment.ReadWrite.All`** (delegate `Application.ReadWrite.OwnedBy`
+to repo SPs for Easy Auth). Re-run that script if these need to be (re)granted.
 
 ## Conventions for agents
 

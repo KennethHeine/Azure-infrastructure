@@ -100,6 +100,46 @@ if ($appId) {
 $global:LASTEXITCODE = 0
 Write-Host ""
 
+# ─── Step 2b: Delete Entra apps owned by the SP (e.g. Easy Auth app) ─
+# Container-app repos with auth create their own Entra "Easy Auth" application
+# at deploy time; the repo SP becomes its owner. That app is a directory object
+# (not inside rg-<repo>), so deleting the resource group won't remove it. Delete
+# every application this SP owns before deleting the SP itself.
+Write-Host "Step 2b: Deleting Entra apps owned by the service principal..." -ForegroundColor Cyan
+if ($appId) {
+    $spObjId = az ad sp list --display-name $ServicePrincipalName --query "[0].id" --output tsv --only-show-errors
+    if ($spObjId) {
+        $ownedJson = az rest --method GET `
+            --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjId/ownedObjects" `
+            --output json --only-show-errors 2>&1
+        if ($LASTEXITCODE -eq 0 -and $ownedJson) {
+            $owned = $ownedJson | ConvertFrom-Json
+            $apps = @($owned.value | Where-Object {
+                $_.'@odata.type' -eq '#microsoft.graph.application' -and $_.appId -ne $appId
+            })
+            if ($apps.Count -eq 0) {
+                Write-Host "  No owned Entra apps to delete" -ForegroundColor Yellow
+            }
+            foreach ($app in $apps) {
+                az ad app delete --id $app.appId --only-show-errors 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "  Deleted Entra app '$($app.displayName)' ($($app.appId))" -ForegroundColor Green
+                } else {
+                    Write-Host "  WARNING: Failed to delete Entra app $($app.appId)" -ForegroundColor Yellow
+                }
+            }
+        } else {
+            Write-Host "  Could not list owned objects — skipping" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  SP object id not found — skipping" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "  App registration not found — skipping" -ForegroundColor Yellow
+}
+$global:LASTEXITCODE = 0
+Write-Host ""
+
 # ─── Step 3: Delete the app registration (removes SP + fed creds) ────
 Write-Host "Step 3: Deleting app registration '$ServicePrincipalName'..." -ForegroundColor Cyan
 if ($appId) {
