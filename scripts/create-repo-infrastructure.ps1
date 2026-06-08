@@ -350,6 +350,50 @@ Add-FederatedCredential `
 
 Write-Host ""
 
+# ─── Step 5b: Grant Graph permission for Entra Easy Auth ─────────────
+# Container-app repos with auth create their own Entra "Easy Auth" application
+# at deploy time via the Microsoft Graph Bicep extension, running as THIS repo's
+# SP. That requires the SP to hold Microsoft Graph Application.ReadWrite.OwnedBy
+# (it can then manage only the apps it owns). The central onboarding SP holds
+# AppRoleAssignment.ReadWrite.All (see setup-service-principal.ps1), so it can
+# grant that app role here. Idempotent.
+if ($Template -eq "container-app" -and $EnableAuth) {
+    Write-Host "Step 5b: Granting Graph 'Application.ReadWrite.OwnedBy' to the SP (Entra auth)..." -ForegroundColor Cyan
+
+    $graphAppId = "00000003-0000-0000-c000-000000000000"
+    $ownedByRoleId = "18a4783c-866b-4cc7-a460-3d5e5662c884"  # Application.ReadWrite.OwnedBy
+
+    if (-not $spObjectId) {
+        $spObjectId = az ad sp list --display-name $ServicePrincipalName `
+            --query "[?appId=='$appId'].id | [0]" --output tsv --only-show-errors
+    }
+    $graphSpId = az ad sp show --id $graphAppId --query "id" --output tsv --only-show-errors
+
+    if ($spObjectId -and $graphSpId) {
+        $existingGrant = az rest --method GET `
+            --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId/appRoleAssignments" `
+            --query "value[?appRoleId=='$ownedByRoleId'] | [0].id" --output tsv --only-show-errors 2>&1
+        if ($existingGrant) {
+            Write-Host "  Application.ReadWrite.OwnedBy already granted" -ForegroundColor Yellow
+        } else {
+            $grantBody = "{`"principalId`":`"$spObjectId`",`"resourceId`":`"$graphSpId`",`"appRoleId`":`"$ownedByRoleId`"}"
+            az rest --method POST `
+                --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId/appRoleAssignments" `
+                --headers "Content-Type=application/json" `
+                --body $grantBody --only-show-errors 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Granted Application.ReadWrite.OwnedBy" -ForegroundColor Green
+            } else {
+                Write-Host "  WARNING: Failed to grant Application.ReadWrite.OwnedBy — Entra auth deploy may fail" -ForegroundColor Yellow
+            }
+        }
+        $global:LASTEXITCODE = 0
+    } else {
+        Write-Host "  WARNING: Could not resolve SP / Graph object IDs — skipping Graph grant" -ForegroundColor Yellow
+    }
+    Write-Host ""
+}
+
 # ─── Step 6: Create GitHub Repository ────────────────────────────────
 Write-Host "Step 6: Creating GitHub repository '$GitHubOrg/$GitHubRepo'..." -ForegroundColor Cyan
 

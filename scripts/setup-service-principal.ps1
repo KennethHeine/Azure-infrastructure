@@ -3,9 +3,13 @@
 # It needs:
 #   1. Owner role on subscription (to create RGs and assign roles to other SPs)
 #   2. Microsoft Graph Application.ReadWrite.All (to create app registrations, SPs, and federated credentials for other repos)
+#   3. Microsoft Graph AppRoleAssignment.ReadWrite.All (to grant each container-app
+#      repo's SP the Application.ReadWrite.OwnedBy role, so that repo can create its
+#      own Entra "Easy Auth" application at deploy time)
 #
 # Run this script ONCE manually with an account that has Global Administrator or
 # Privileged Role Administrator to grant admin consent for the Graph API permissions.
+# It is idempotent — safe to re-run to add newly-required permissions.
 
 [CmdletBinding()]
 param(
@@ -117,51 +121,49 @@ if ($existingRole) {
 
 # ─── Step 4: Grant Microsoft Graph API permissions ───────────────────
 Write-Host "Step 4: Granting Microsoft Graph API permissions..." -ForegroundColor Cyan
-Write-Host "  (Application.ReadWrite.All — required to create SPs and federated credentials for other repos)" -ForegroundColor Gray
 
 # Microsoft Graph well-known appId
 $graphAppId = "00000003-0000-0000-c000-000000000000"
 
-# Application.ReadWrite.All app role ID (constant across all tenants)
-$appReadWriteAllId = "1bfefb4e-e0b5-418b-a88f-73c46d2cc8e9"
+# Graph application permissions (app roles) this SP needs. App role IDs are
+# constant across all tenants.
+#   Application.ReadWrite.All       -> create app registrations, SPs, and
+#                                      federated credentials for onboarded repos
+#   AppRoleAssignment.ReadWrite.All -> grant each container-app repo's SP the
+#                                      Application.ReadWrite.OwnedBy role, so that
+#                                      repo's own deploy can create its Entra
+#                                      "Easy Auth" application via Microsoft Graph
+$graphPermissions = [ordered]@{
+    "Application.ReadWrite.All"       = "1bfefb4e-e0b5-418b-a88f-73c46d2cc8e9"
+    "AppRoleAssignment.ReadWrite.All" = "06b708a9-e830-4db3-a914-8e69da51d44f"
+}
 
-# Check if the permission is already configured on the app registration
 $existingPermissions = az ad app permission list --id $appId --only-show-errors --output json | ConvertFrom-Json
-$hasPermission = $existingPermissions | Where-Object { $_.resourceAppId -eq $graphAppId } |
-    ForEach-Object { $_.resourceAccess } |
-    Where-Object { $_.id -eq $appReadWriteAllId -and $_.type -eq "Role" }
+foreach ($perm in $graphPermissions.GetEnumerator()) {
+    $hasPermission = $existingPermissions | Where-Object { $_.resourceAppId -eq $graphAppId } |
+        ForEach-Object { $_.resourceAccess } |
+        Where-Object { $_.id -eq $perm.Value -and $_.type -eq "Role" }
 
-if ($hasPermission) {
-    Write-Host "  API permission Application.ReadWrite.All already configured" -ForegroundColor Yellow
-} else {
-    az ad app permission add `
-        --id $appId `
-        --api $graphAppId `
-        --api-permissions "${appReadWriteAllId}=Role" --only-show-errors 2>&1 | Out-Null
-    Write-Host "  API permission added to app registration" -ForegroundColor Green
-}
-
-# Check if admin consent is already granted
-$grantedPermissions = az ad app permission list-grants --id $appId --only-show-errors --output json 2>&1
-$hasConsent = $false
-if ($LASTEXITCODE -eq 0 -and $grantedPermissions) {
-    $grants = $grantedPermissions | ConvertFrom-Json
-    $hasConsent = $grants | Where-Object { $_.resourceId -and $_.scope -match "Application.ReadWrite.All" }
-}
-
-if ($hasConsent) {
-    Write-Host "  Admin consent already granted" -ForegroundColor Yellow
-} else {
-    Write-Host "  Granting admin consent (requires Global Admin or Privileged Role Admin)..." -ForegroundColor Gray
-    az ad app permission admin-consent --id $appId --only-show-errors 2>&1
-
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "  Admin consent granted" -ForegroundColor Green
+    if ($hasPermission) {
+        Write-Host "  $($perm.Key) already configured" -ForegroundColor Yellow
     } else {
-        Write-Host "  WARNING: Admin consent failed. Ask a Global Admin to grant consent for" -ForegroundColor Red
-        Write-Host "  Application.ReadWrite.All on app '$ServicePrincipalName' ($appId)" -ForegroundColor Red
-        Write-Host "  Without this, the infra repo cannot create SPs for other repos." -ForegroundColor Red
+        az ad app permission add `
+            --id $appId `
+            --api $graphAppId `
+            --api-permissions "$($perm.Value)=Role" --only-show-errors 2>&1 | Out-Null
+        Write-Host "  Added $($perm.Key) to app registration" -ForegroundColor Green
     }
+}
+
+# Grant admin consent for all configured permissions (idempotent — safe to re-run).
+Write-Host "  Granting admin consent (requires Global Admin or Privileged Role Admin)..." -ForegroundColor Gray
+az ad app permission admin-consent --id $appId --only-show-errors 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  Admin consent granted" -ForegroundColor Green
+} else {
+    Write-Host "  WARNING: Admin consent failed. Ask a Global Admin to grant consent for the" -ForegroundColor Red
+    Write-Host "  Graph permissions above on app '$ServicePrincipalName' ($appId)." -ForegroundColor Red
+    Write-Host "  Without them, the infra repo cannot onboard repos or enable Entra auth." -ForegroundColor Red
 }
 
 # ─── Step 5: Create federated credentials for THIS repo ─────────────
@@ -227,6 +229,7 @@ Write-Host ""
 Write-Host "Infrastructure SP Permissions:" -ForegroundColor Green
 Write-Host "  - Owner role on subscription $subscriptionId"
 Write-Host "  - Microsoft Graph: Application.ReadWrite.All (create SPs for other repos)"
+Write-Host "  - Microsoft Graph: AppRoleAssignment.ReadWrite.All (grant repo SPs Application.ReadWrite.OwnedBy for Easy Auth)"
 Write-Host ""
 Write-Host "Add these secrets to the '$GitHubRepo' GitHub repository:" -ForegroundColor Yellow
 Write-Host "  Settings > Secrets and variables > Actions > New repository secret"
