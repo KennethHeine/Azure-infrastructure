@@ -7,11 +7,6 @@
     "football-tournament",
     "test-chat",
     "fodboldturnering",
-    "test-repo",
-    {
-      "name": "ca-smoke-test",
-      "template": "container-app",
-      "auth": true
-    }
+    "test-repo"
   ]
 }
