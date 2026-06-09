@@ -70,11 +70,48 @@ starts using a new Azure resource type. Schema: `providers.schema.json`.
 
 | Template | Repo | What you get |
 |----------|------|--------------|
-| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, **its own per-repo ACR** with image pull via a user-assigned managed identity granted AcrPull (all declared in the template's Bicep, in `rg-<repo>`), secret-less **Entra Easy Auth** (default on), `deploy-infra` + `deploy-app` workflows. `deploy-app` builds + pushes the image on the runner and updates the app. |
+| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, **its own per-repo ACR** with image pull via a user-assigned managed identity granted AcrPull (all declared in the template's Bicep, in `rg-<repo>`), secret-less **Entra Easy Auth** (default on), optional **custom domain** (managed cert), `deploy-infra` + `deploy-app` workflows that are **thin callers of the reusable workflows below**. `deploy-app` builds the image with **`az acr build`** (cloud build) and updates the app. |
 | `static-web` | [`KennethHeine/template-static-web`](https://github.com/KennethHeine/template-static-web) | Next.js static export → **Azure Static Web Apps**, open/public, `deploy-infra` + `deploy` (prod + PR preview) workflows |
 
 New repos are created with `gh repo create --template`. Templated repos keep
 their own README/AGENTS.md/CLAUDE.md (the onboarding doc-seeding is skipped for them).
+
+## Reusable container-app workflows (single source of truth)
+
+The container-app deploy logic lives **here**, in two reusable workflows, so it's
+maintained in one place for every container-app repo instead of being copy-pasted
+into each one:
+
+| Reusable workflow | What it does |
+|-------------------|--------------|
+| `.github/workflows/container-app-deploy-infra.yml` | Deploys the repo's `infra/main.bicep` (image-preservation on re-deploy, optional custom-domain hostname registration → bind, post-deploy re-auth, conditional Easy-Auth CLI pre-authorization). |
+| `.github/workflows/container-app-deploy-app.yml` | Builds images with **`az acr build`** (cloud build — no Docker on the runner) and points the Container App at the new image. `setup` → `build-app` ‖ `build-extra` (matrix, parallel) → `deploy`. Input `extra_images` (JSON `[{suffix,dockerfile,context}]`) builds extra images, e.g. a sidecar/runner image, each as its own parallel job. |
+
+Each container-app repo keeps only **thin callers** (`deploy-infra.yml` /
+`deploy-app.yml`) that `uses:` these `@main` with `secrets: inherit`:
+
+```yaml
+jobs:
+  deploy:
+    uses: KennethHeine/Azure-infrastructure/.github/workflows/container-app-deploy-app.yml@main
+    secrets: inherit
+    # with: { extra_images: '[{"suffix":"-runner","dockerfile":"Dockerfile","context":"runner"}]' }
+```
+
+Pinned to **`@main`** on purpose: an edit here propagates to every repo on its
+next run. The caller still declares its own `on:` triggers and
+`permissions: { id-token: write, contents: read }` (OIDC permission must be
+granted by the caller).
+
+**Bicep contract** — for a repo to use the reusable workflows, its
+`infra/main.bicep` must accept params **`appName`**, **`image`**,
+**`bindCustomDomain`** and emit outputs **`containerAppName`**,
+**`containerAppFqdn`**, **`authEnabled`**, **`authAppClientId`**,
+**`authAppUserImpersonationScopeId`**, **`azureCliClientId`**. `appName` unset (or
+`"app"`) → the workflow derives the sanitized repo name; names derive as
+`ca-/cae-/log-/id-<appName>`. RBAC the app's identity needs at runtime belongs in
+the Bicep (e.g. `claude-runner` grants its UAMI Contributor on `rg-<repo>` in
+Bicep so it can manage per-session ACI), **not** as an imperative workflow step.
 
 ## Per-repo Azure Container Registry
 
@@ -84,8 +121,8 @@ ACR inside `rg-<repo>`**, declared in the template's `infra/main.bicep`
 per repo.
 
 Access model (least-privilege, all within `rg-<repo>` — no cross-RG grants):
-- The repo's SP is **Owner of `rg-<repo>`**, so it can create the ACR and push
-  images (via `az acr login`) with no extra role assignment.
+- The repo's SP is **Owner of `rg-<repo>`**, so it can create the ACR and build/push
+  images (via `az acr build` — cloud build) with no extra role assignment.
 - The Container App pulls with a **user-assigned managed identity** granted
   **AcrPull** on that ACR. The identity, the ACR, and the AcrPull role
   assignment are all created declaratively in the template's Bicep (the SP can
