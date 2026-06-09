@@ -71,7 +71,7 @@ starts using a new Azure resource type. Schema: `providers.schema.json`.
 | Template | Repo | What you get |
 |----------|------|--------------|
 | `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, **its own per-repo ACR** with image pull via a user-assigned managed identity granted AcrPull (all declared in the template's Bicep, in `rg-<repo>`), secret-less **Entra Easy Auth** (default on), optional **custom domain** (managed cert), `deploy-infra` + `deploy-app` workflows that are **thin callers of the reusable workflows below**. `deploy-app` builds the image with **`az acr build`** (cloud build) and updates the app. |
-| `static-web` | [`KennethHeine/template-static-web`](https://github.com/KennethHeine/template-static-web) | Next.js static export → **Azure Static Web Apps**, open/public, `deploy-infra` + `deploy` (prod + PR preview) workflows |
+| `static-web` | [`KennethHeine/template-static-web`](https://github.com/KennethHeine/template-static-web) | Next.js static export → **Azure Static Web Apps**, open/public, `deploy-infra` + `deploy` (prod + PR preview) workflows that are **thin callers of the reusable workflows below**. The SWA deployment token is **fetched at deploy time via OIDC** — no stored secret, no manual onboarding step. |
 
 New repos are created with `gh repo create --template`. Templated repos keep
 their own README/AGENTS.md/CLAUDE.md (the onboarding doc-seeding is skipped for them).
@@ -112,6 +112,36 @@ granted by the caller).
 `ca-/cae-/log-/id-<appName>`. RBAC the app's identity needs at runtime belongs in
 the Bicep (e.g. `claude-runner` grants its UAMI Contributor on `rg-<repo>` in
 Bicep so it can manage per-session ACI), **not** as an imperative workflow step.
+
+## Reusable static-web workflows (single source of truth)
+
+The static-web deploy logic also lives **here**, in two reusable workflows, so
+every static frontend repo shares one source:
+
+| Reusable workflow | What it does |
+|-------------------|--------------|
+| `.github/workflows/static-web-deploy-infra.yml` | Deploys the repo's `infra/main.bicep` into its resource group. On `pull_request` (with `whatif: true`) posts an informational what-if to the job summary instead of deploying. Inputs: `resource_group`, `bicep_param` (default `infra/main.bicepparam`), `whatif`. |
+| `.github/workflows/static-web-deploy.yml` | Builds the app and deploys to Azure Static Web Apps. **Fetches the SWA deployment token at deploy time via OIDC** (`az staticwebapp secrets list`) — no `AZURE_STATIC_WEB_APPS_API_TOKEN` secret to store. Production on push; per-PR preview on `pull_request` (closed on PR close). Inputs: `app_dir` (default `web`), `resource_group`, optional quality gate `test_command` + `run_e2e` (Playwright). Deploy steps are skipped for Dependabot (the gate still runs). |
+
+Each static-web repo keeps only **thin callers** (`deploy-infra.yml` /
+`deploy.yml`) pinned `@main` with `secrets: inherit`:
+
+```yaml
+jobs:
+  deploy:
+    uses: KennethHeine/Azure-infrastructure/.github/workflows/static-web-deploy.yml@main
+    secrets: inherit
+    with:
+      app_dir: static-web-app
+      # test_command: 'npm run lint && npm run format:check && npm test'
+      # run_e2e: true
+```
+
+The caller declares its own `on:` triggers (push to app paths, `pull_request`
+incl. `closed`, dispatch) and `permissions: { id-token: write, contents: read,
+pull-requests: write }`. The app contract: an npm project under `app_dir` whose
+`npm run build` emits `<app_dir>/out`. Because the token is fetched at deploy
+time, **the old one-time `AZURE_STATIC_WEB_APPS_API_TOKEN` setup step is gone.**
 
 ## Per-repo Azure Container Registry
 

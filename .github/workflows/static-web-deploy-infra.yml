@@ -1,0 +1,110 @@
+name: Static Web — Deploy Infrastructure (reusable)
+
+# Reusable infrastructure-deploy workflow for every static-web repo. Each repo
+# keeps only a thin caller:
+#
+#   jobs:
+#     deploy:
+#       uses: KennethHeine/Azure-infrastructure/.github/workflows/static-web-deploy-infra.yml@main
+#       secrets: inherit
+#       # with: { bicep_param: 'infra/parameters/production.bicepparam', whatif: true }
+#
+# Deploys the repo's infra/main.bicep into its resource group. On pull_request
+# (when whatif: true) it runs an informational what-if and posts it to the job
+# summary instead of deploying.
+
+on:
+  workflow_call:
+    inputs:
+      resource_group:
+        description: 'Resource group to deploy into. Falls back to vars.RESOURCE_GROUP then rg-<repo>.'
+        type: string
+        required: false
+        default: ''
+      bicep_param:
+        description: 'Path to the .bicepparam file.'
+        type: string
+        required: false
+        default: 'infra/main.bicepparam'
+      whatif:
+        description: 'On pull_request, run what-if and post to the summary instead of deploying.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve resource group
+        id: rg
+        shell: bash
+        run: |
+          set -euo pipefail
+          RG='${{ inputs.resource_group }}'
+          [ -z "$RG" ] && RG='${{ vars.RESOURCE_GROUP }}'
+          [ -z "$RG" ] && RG="rg-${{ github.event.repository.name }}"
+          echo "name=$RG" >> "$GITHUB_OUTPUT"
+          echo "Resource group: $RG"
+
+      - name: What-If (pull request)
+        if: ${{ github.event_name == 'pull_request' && inputs.whatif }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RG='${{ steps.rg.outputs.name }}'
+          echo "## 🔍 Infrastructure what-if (\`$RG\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          az deployment group what-if \
+            --name "whatif-${GITHUB_RUN_ID}" \
+            --resource-group "$RG" \
+            --template-file infra/main.bicep \
+            --parameters '${{ inputs.bicep_param }}' 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy Bicep
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RG='${{ steps.rg.outputs.name }}'
+          deployment_name="infra-$(date +%Y%m%d%H%M%S)"
+          echo "Deploying to resource group: $RG"
+          az deployment group create \
+            --name "$deployment_name" \
+            --resource-group "$RG" \
+            --template-file infra/main.bicep \
+            --parameters '${{ inputs.bicep_param }}' \
+            --only-show-errors
+
+      - name: Output Static Web App details
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RG='${{ steps.rg.outputs.name }}'
+          name=$(az staticwebapp list --resource-group "$RG" --query "[0].name" -o tsv)
+          hostname=$(az staticwebapp show --name "$name" --resource-group "$RG" --query "defaultHostname" -o tsv)
+          {
+            echo "## Static Web App provisioned"
+            echo ""
+            echo "- Name: \`$name\`"
+            echo "- Default hostname: https://$hostname"
+            echo ""
+            echo "The deploy workflow fetches the deployment token at deploy time (OIDC) —"
+            echo "no \`AZURE_STATIC_WEB_APPS_API_TOKEN\` secret needs to be set."
+          } >> "$GITHUB_STEP_SUMMARY"
