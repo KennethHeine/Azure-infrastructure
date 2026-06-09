@@ -59,6 +59,19 @@ Write-Host ""
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { "." }
 $onboardScript = Join-Path $scriptDir "create-repo-infrastructure.ps1"
 
+# ─── Ensure required resource providers are registered ───────────────
+# Subscription-level, estate-wide, idempotent — run once before any repo so a
+# repo's first Bicep deploy never fails on an unregistered provider.
+$registerProviders = Join-Path $scriptDir "register-providers.ps1"
+if (Test-Path $registerProviders) {
+    & $registerProviders
+    if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+        Write-Host "Error: Provider registration failed." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ""
+}
+
 if (-not (Test-Path $onboardScript)) {
     Write-Host "Error: Onboarding script not found: $onboardScript" -ForegroundColor Red
     exit 1
