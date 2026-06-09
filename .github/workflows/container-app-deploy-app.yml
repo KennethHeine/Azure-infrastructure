@@ -18,11 +18,14 @@ name: Container App — Deploy App (reusable)
 #       uses: KennethHeine/Azure-infrastructure/.github/workflows/container-app-deploy-app.yml@main
 #       secrets: inherit
 #       with:
-#         extra_images: '[{"suffix":"-runner","dockerfile":"Dockerfile","context":"runner"}]'
+#         extra_images: '[{"suffix":"-runner","dockerfile":"runner/Dockerfile","context":"."}]'
 #
 # extra_images is a JSON array; for each entry the image is pushed as
 # <repo><suffix>:<sha> and <repo><suffix>:latest, built from <context> using
-# <dockerfile> (dockerfile path is relative to context).
+# <dockerfile> (dockerfile path is relative to context). Prefer context "." (repo
+# root) with the dockerfile path from the root, e.g. "runner/Dockerfile" — az acr
+# build resolves --file against the source root, so a subdir context can pick up
+# the wrong Dockerfile.
 
 on:
   workflow_call:

@@ -95,7 +95,7 @@ jobs:
   deploy:
     uses: KennethHeine/Azure-infrastructure/.github/workflows/container-app-deploy-app.yml@main
     secrets: inherit
-    # with: { extra_images: '[{"suffix":"-runner","dockerfile":"Dockerfile","context":"runner"}]' }
+    # with: { extra_images: '[{"suffix":"-runner","dockerfile":"runner/Dockerfile","context":"."}]' }
 ```
 
 Pinned to **`@main`** on purpose: an edit here propagates to every repo on its
