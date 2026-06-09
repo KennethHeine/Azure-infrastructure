@@ -1,128 +1,142 @@
 # Azure-infrastructure
 
-Central infrastructure repository that manages Azure resources and GitHub OIDC authentication for other repositories.
+Control-plane repository for Kenneth's Azure + GitHub estate. It onboards new
+application repositories, provisions their **isolated** Azure footprint, and
+provides one-click workflows to add or decommission repos. Everything is
+**OIDC / managed-identity based — no Azure passwords or client secrets are
+stored anywhere.**
 
-## What this repo does
+> Agent/operator deep-dive: see [`CLAUDE.md`](./CLAUDE.md).
 
-1. **Creates Resource Groups** in an Azure subscription for each onboarded repo
-2. **Creates Service Principals** with federated credentials (passwordless OIDC) for each repo
-3. **Assigns Owner role** scoped to the repo's own Resource Group (least-privilege)
+## What it does
 
-## Architecture
+For every onboarded repo it creates:
+
+1. A **resource group** `rg-<repo>` (region from `repos.json`, default
+   `swedencentral`).
+2. An Entra **app registration + service principal** `sp-<repo>-github` with
+   **federated (OIDC) credentials** for the repo's `main` branch — no secret.
+3. An **Owner** role assignment for that SP scoped to **`rg-<repo>` only** —
+   least-privilege, no access to any other resource group.
+4. A **GitHub repo** scaffolded from a starter template (optional), with the
+   `AZURE_*` secrets and the Actions variables the template workflows consume.
+
+Each onboarded repo is then **self-deploying**: its own workflows build Bicep
+and deploy into its own resource group using its own SP.
 
 ```
 Azure-infrastructure (this repo)
   └── SP: sp-azure-infrastructure-github
-        ├── Owner on subscription (creates RGs, assigns roles)
-        └── Graph API: Application.ReadWrite.All (creates SPs + federated creds)
+        ├── Owner on the subscription (creates RGs, assigns roles)
+        └── Microsoft Graph: Application.ReadWrite.All + AppRoleAssignment.ReadWrite.All
 
 Onboarded repos:
-  ├── my-app
-  │     └── SP: sp-my-app-github → Owner on rg-my-app
-  ├── my-api
-  │     └── SP: sp-my-api-github → Owner on rg-my-api
-  └── ...
+  ├── my-api   → SP sp-my-api-github  → Owner on rg-my-api  (own ACR, Container App, …)
+  └── my-site  → SP sp-my-site-github → Owner on rg-my-site (Static Web App, …)
 ```
 
-## Prerequisites
+## Config: `repos.json`
 
-- [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli) installed
-- Logged in with `az login` using an account with **Global Admin** or **Privileged Role Admin** (for initial setup only)
+Single source of truth. Each entry is a plain string (empty repo, no template)
+or an object selecting a template:
 
-## Initial Setup (one-time)
-
-Run once to create the service principal for this infrastructure repo:
-
-```powershell
-.\scripts\setup-service-principal.ps1
-```
-
-This creates `sp-azure-infrastructure-github` with:
-- **Owner** role on the subscription
-- **Microsoft Graph `Application.ReadWrite.All`** (to manage app registrations for other repos)
-- Federated credentials for `main` branch and pull requests
-
-After running, add the output secrets to this GitHub repo:
-- `AZURE_CLIENT_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
-
-## Onboard a New Repository
-
-### 1. Add the repo name to `repos.json`
-
-```json
+```jsonc
 {
   "gitHubOrg": "KennethHeine",
-  "location": "norwayeast",
+  "location": "swedencentral",
   "repos": [
-    "my-app",
-    "my-api"
+    "legacy-empty-repo",                                  // string = no template
+    { "name": "my-api",  "template": "container-app", "auth": true },
+    { "name": "my-site", "template": "static-web" }
   ]
 }
 ```
 
-Each entry is just a repo name string. Names are used to derive:
-- Resource Group: `rg-<repo>`
-- Service Principal: `sp-<repo>-github`
-- Federated credentials: `main` branch + pull requests
+`template`: `container-app` | `static-web` | `none`. `auth` (container-app only,
+default **true**) toggles Entra built-in auth. Schema: `repos.schema.json`.
+Onboarding is **idempotent** — re-running never duplicates resources.
 
-### 2. Push to main (or trigger manually)
+## Starter templates
 
-The **Onboard Repositories** workflow runs automatically when `repos.json` changes on `main`, or you can trigger it manually from the Actions tab.
+| Template | Source | What you get |
+|----------|--------|--------------|
+| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App (scale-to-zero, Log Analytics), **its own per-repo ACR** with image pull via a user-assigned managed identity, secret-less **Entra Easy Auth** (default on). |
+| `static-web` | [`KennethHeine/template-static-web`](https://github.com/KennethHeine/template-static-web) | Next.js static export on Azure Static Web Apps (prod + PR previews). |
 
-It processes **every repo in the list** and is **fully idempotent** — existing resources are detected and skipped, so you can run it as many times as you want.
+Each `container-app` repo gets **its own** container registry inside `rg-<repo>`
+— there is no shared registry, so image push/pull is fully isolated per repo.
 
-### 3. Add secrets to the onboarded repo
+## Operating it
 
-After the workflow runs, check the logs for the output values and add these secrets to each new repo:
-- `AZURE_CLIENT_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
+### Add a repo
+Run **Add Repo** (`add-repo.yml`) from the Actions tab, or:
 
-### Running locally
-
-```powershell
-# Process all repos from repos.json
-.\scripts\process-repos.ps1
-
-# Or onboard a single repo directly
-.\scripts\create-repo-infrastructure.ps1 -GitHubRepo "my-app"
+```bash
+gh workflow run add-repo.yml --repo KennethHeine/Azure-infrastructure \
+  -f name=my-api -f template=container-app -f auth=true
 ```
 
-### What gets created per repo
+It appends the entry to `repos.json` and pushes to `main` (using
+`AUTOMATION_GITHUB_TOKEN`), which triggers **Onboard Repositories**.
 
-| Resource | Naming | Details |
-|---|---|---|
-| Resource Group | `rg-<repo>` | In the configured Azure region |
-| App Registration | `sp-<repo>-github` | In Azure AD |
-| Service Principal | — | Linked to the app registration |
-| Federated Credentials | — | OIDC trust for `main` branch + pull requests |
-| Role Assignment | — | **Owner** on the repo's Resource Group only |
-| GitHub Repo | `<org>/<repo>` | Private, auto-delete merged branches (needs `AUTOMATION_GITHUB_TOKEN`) |
-| Repo Secrets | — | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` |
-| `README.md` | — | Seeded with the repo's infrastructure details |
-| `AGENTS.md` + `CLAUDE.md` | — | Agent guide: Azure setup + "build Bicep, deploy via workflows" convention |
+### Decommission a repo
+Run **Decommission Repo** (`decommission-repo.yml`) — you must type the repo
+name into `confirm`. It removes the `repos.json` entry, deletes `rg-<repo>`
+(including the repo's ACR + images, Container App, identity, etc.), the SP, any
+Entra apps the SP owns (e.g. the Easy Auth app), and — per the `github_repo`
+input — **keeps**, **archives** (read-only), or **deletes** the GitHub repo.
 
-> The GitHub repo, secrets, README, and agent files are created only when `AUTOMATION_GITHUB_TOKEN` is set. All file seeding is idempotent and **only adds files that don't already exist**, so re-running backfills `AGENTS.md`/`CLAUDE.md` into already-onboarded repos without overwriting anything.
+### Manually
+```powershell
+# All repos from repos.json (needs az login + AUTOMATION_GITHUB_TOKEN):
+./scripts/process-repos.ps1 -ConfigFile ./repos.json
+
+# A single repo:
+./scripts/create-repo-infrastructure.ps1 -GitHubRepo my-api -Template container-app
+```
+
+## One-time setup
+
+```powershell
+# Logged in as Global Admin / Privileged Role Admin (for admin consent):
+./scripts/setup-service-principal.ps1
+```
+
+Creates `sp-azure-infrastructure-github` with **Owner** on the subscription and
+Microsoft Graph **`Application.ReadWrite.All`** + **`AppRoleAssignment.ReadWrite.All`**,
+plus a `main`-branch federated credential. Add the printed `AZURE_CLIENT_ID`,
+`AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` as repo secrets, plus
+`AUTOMATION_GITHUB_TOKEN` (see below).
+
+## The automation token
+
+`AUTOMATION_GITHUB_TOKEN` is a classic PAT with `repo` (+ `workflow`, and
+`delete_repo` if decommission should delete repos). Onboarding validates it up
+front (`scripts/test-automation-token.ps1`); rotate it with
+`scripts/rotate-automation-token.ps1`.
 
 ## Scripts
 
 | Script | Purpose |
 |---|---|
-| `scripts/setup-service-principal.ps1` | One-time setup of this infra repo's own SP |
-| `scripts/create-repo-infrastructure.ps1` | Onboard a single repo (RG + SP + federated creds) |
-| `scripts/process-repos.ps1` | Read `repos.json` and onboard all repos in the list |
+| `setup-service-principal.ps1` | One-time setup of this repo's own SP |
+| `create-repo-infrastructure.ps1` | Onboard a single repo (RG + SP + OIDC + GitHub repo) |
+| `process-repos.ps1` | Onboard every repo in `repos.json` |
+| `decommission-repo.ps1` | Tear down one repo's footprint |
+| `test-automation-token.ps1` | Validate `AUTOMATION_GITHUB_TOKEN` |
+| `rotate-automation-token.ps1` | Rotate `AUTOMATION_GITHUB_TOKEN` |
+| `set-github-secrets.ps1` | Set this repo's `AZURE_*` secrets |
 
-## Config
-
-| File | Purpose |
-|---|---|
-| `repos.json` | Array of repos to onboard (with optional per-repo overrides) |
-| `repos.schema.json` | JSON schema for `repos.json` (editor validation/autocomplete) |
-
-## GitHub Actions Workflow
+## Workflows
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `onboard-repos.yml` | Push to main (when `repos.json` changes) or manual | Runs `process-repos.ps1` for all repos |
+| `onboard-repos.yml` | push to `repos.json` on main, manual | Provision/refresh all repos |
+| `add-repo.yml` | manual (inputs) | Add an entry to `repos.json` → triggers onboarding |
+| `decommission-repo.yml` | manual (inputs + confirm) | Full teardown of one repo |
+| `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone (creates `rg-dns`) |
+
+## Required secrets (on this repo)
+
+`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (the onboarding SP)
+and `AUTOMATION_GITHUB_TOKEN`.

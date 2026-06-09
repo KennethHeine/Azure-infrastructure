@@ -1,10 +1,11 @@
 # Azure-infrastructure — Agent & Operator Guide
 
 This repository is the **control plane** for Kenneth's Azure + GitHub estate. It
-onboards new application repositories, provisions their isolated Azure footprint,
-owns the shared container registry, and provides one-click workflows to add or
-decommission repos. Everything is OIDC / managed-identity based — **no Azure
-passwords or client secrets are stored anywhere.**
+onboards new application repositories, provisions their isolated Azure footprint
+(each repo gets its own resource group and, for container apps, its own
+registry), and provides one-click workflows to add or decommission repos.
+Everything is OIDC / managed-identity based — **no Azure passwords or client
+secrets are stored anywhere.**
 
 ## Mental model
 
@@ -16,10 +17,9 @@ repos.json  ──push to main──►  Onboard Repositories workflow
                                              ├─ sp-<repo>-github             (Entra app + SP)
                                              ├─ OIDC federated creds         (main + PRs)
                                              ├─ Owner on rg-<repo>
-                                             ├─ shared-ACR grants            (container-app repos)
                                              ├─ GitHub repo                  (from a template)
                                              ├─ secrets: AZURE_CLIENT_ID/TENANT_ID/SUBSCRIPTION_ID
-                                             └─ variables: RESOURCE_GROUP, ACR_*, ENABLE_AUTH
+                                             └─ variables: RESOURCE_GROUP, ENABLE_AUTH (container-app)
 ```
 
 Each onboarded repo is **self-deploying**: its own `deploy-infra` / `deploy-app`
@@ -35,7 +35,7 @@ template) or an object selecting a template:
 ```jsonc
 {
   "gitHubOrg": "KennethHeine",
-  "location": "norwayeast",
+  "location": "swedencentral",
   "repos": [
     "legacy-empty-repo",                                   // string = no template
     { "name": "my-api",  "template": "container-app", "auth": true },
@@ -52,32 +52,31 @@ Onboarding is **idempotent** — re-running never duplicates resources.
 
 | Template | Repo | What you get |
 |----------|------|--------------|
-| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, image pull from the **shared ACR via a user-assigned managed identity** (the `deploy-infra` workflow creates the identity and grants it AcrPull), secret-less **Entra Easy Auth** (default on), `deploy-infra` + `deploy-app` workflows. `deploy-app` builds + pushes the image on the runner and updates the app. |
+| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, **its own per-repo ACR** with image pull via a user-assigned managed identity granted AcrPull (all declared in the template's Bicep, in `rg-<repo>`), secret-less **Entra Easy Auth** (default on), `deploy-infra` + `deploy-app` workflows. `deploy-app` builds + pushes the image on the runner and updates the app. |
 | `static-web` | [`KennethHeine/template-static-web`](https://github.com/KennethHeine/template-static-web) | Next.js static export → **Azure Static Web Apps**, open/public, `deploy-infra` + `deploy` (prod + PR preview) workflows |
 
 New repos are created with `gh repo create --template`. Templated repos keep
 their own README/AGENTS.md/CLAUDE.md (the onboarding doc-seeding is skipped for them).
 
-## Shared Azure Container Registry
+## Per-repo Azure Container Registry
 
-`shared/main.bicep` provisions one ACR (Standard, admin user disabled) in
-`rg-shared`, deployed by the **Deploy Shared Infrastructure** workflow
-(`deploy-shared.yml`). It must exist before onboarding a `container-app` repo.
+There is **no shared registry**. Each `container-app` repo provisions **its own
+ACR inside `rg-<repo>`**, declared in the template's `infra/main.bicep`
+(`KennethHeine/template-container-app`), so image push/pull is fully isolated
+per repo.
 
-Access model (least-privilege, validated against Microsoft Learn):
-- Each container-app repo's SP gets **AcrPush** (push images) on the ACR.
-- Each SP also gets **Role Based Access Control Administrator** scoped to the ACR
-  with an **ABAC condition constraining it to assign only the AcrPull role** — so
-  the app's own deploy can grant *its* Container App's user-assigned managed
-  identity pull access, and nothing more. (RBAC Admin + condition is the MS-
-  recommended delegation, narrower than User Access Administrator.)
-- Container Apps pull images using a **user-assigned managed identity** + AcrPull
-  — no admin credentials, no secrets.
+Access model (least-privilege, all within `rg-<repo>` — no cross-RG grants):
+- The repo's SP is **Owner of `rg-<repo>`**, so it can create the ACR and push
+  images (via `az acr login`) with no extra role assignment.
+- The Container App pulls with a **user-assigned managed identity** granted
+  **AcrPull** on that ACR. The identity, the ACR, and the AcrPull role
+  assignment are all created declaratively in the template's Bicep (the SP can
+  assign roles in its own RG, so no imperative pre-step is needed).
+- ACR has **admin user disabled** — identity-based access only, no secrets.
 
-> Note: ACR is migrating toward "ABAC-enabled" mode where `AcrPull`/`AcrPush` are
-> replaced by `Container Registry Repository Reader/Writer` + `Catalog Lister`.
-> This registry uses the classic RBAC mode where the familiar roles work. Revisit
-> if/when migrating.
+This replaced an earlier design with a single shared ACR in `rg-shared` plus a
+constrained RBAC-Admin/ABAC delegation; per-repo registries remove the
+cross-repo image isolation gaps and the cross-RG delegation entirely.
 
 ## Entra Easy Auth (container-app repos)
 
@@ -110,10 +109,10 @@ push triggers onboarding). Then watch **Onboard Repositories**.
 
 ### Decommission a repo
 Run **Decommission Repo** (`decommission-repo.yml`) — you must type the repo name
-into `confirm`. It removes the repos.json entry and deletes `rg-<repo>`, the SP,
-**any Entra apps the SP owns (e.g. the Easy Auth app)**, the shared-ACR grants +
-image, and — per the `github_repo` input — **keeps**, **archives** (read-only), or
-**deletes** the GitHub repo.
+into `confirm`. It removes the repos.json entry and deletes `rg-<repo>` (which
+includes the repo's own ACR + images), the SP, **any Entra apps the SP owns
+(e.g. the Easy Auth app)**, and — per the `github_repo` input — **keeps**,
+**archives** (read-only), or **deletes** the GitHub repo.
 
 ### Manually
 `pwsh ./scripts/process-repos.ps1 -ConfigFile ./repos.json` (needs `az login` +
@@ -134,8 +133,7 @@ URL, validates, writes the secret, optionally re-runs onboarding).
 | `onboard-repos.yml` | push to `repos.json` on main, manual | Provision/refresh all repos |
 | `add-repo.yml` | manual (inputs) | Add an entry to repos.json → triggers onboarding |
 | `decommission-repo.yml` | manual (inputs + confirm) | Full teardown of one repo |
-| `deploy-shared.yml` | push to `shared/**`, manual | Deploy the shared ACR |
-| `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone |
+| `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone (creates `rg-dns`) |
 
 ## Required secrets (on this repo)
 
@@ -151,8 +149,9 @@ to repo SPs for Easy Auth). Re-run that script if these need to be (re)granted.
 
 - **Bicep only**, deployed via GitHub Actions — never create Azure resources by
   hand or with ad-hoc CLI in the portal.
-- Keep everything **idempotent** and **scoped** (per-repo resources in `rg-<repo>`;
-  shared things in `rg-shared`).
+- Keep everything **idempotent** and **scoped** (per-repo resources — including
+  each container-app repo's own ACR — live in `rg-<repo>`; estate-wide things
+  like the DNS zone live in their own RG, e.g. `rg-dns`).
 - **No stored credentials** — OIDC federated identity for CI, managed identities
   for runtime.
 - PowerShell scripts target **pwsh 7+**; validate edits with

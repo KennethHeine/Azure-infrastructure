@@ -207,17 +207,27 @@ function Add-FederatedCredential {
     }
 }
 
-# Main branch
+# Main branch only. This SP is Owner on the whole subscription, so it must NOT
+# trust pull_request OIDC tokens: a PR-triggered workflow (or a "pwn-request")
+# could otherwise mint a subscription-Owner token. Onboarding only ever runs on
+# push-to-main / workflow_dispatch, so a main-branch credential is sufficient.
 Add-FederatedCredential `
     -Name "github-actions-main" `
     -Subject "repo:$GitHubOrg/${GitHubRepo}:ref:refs/heads/main" `
     -Description "GitHub Actions - main branch deployments"
 
-# Pull requests
-Add-FederatedCredential `
-    -Name "github-actions-pr" `
-    -Subject "repo:$GitHubOrg/${GitHubRepo}:pull_request" `
-    -Description "GitHub Actions - pull request validation"
+# Remove the legacy pull_request federated credential if a previous run created
+# it — it is an unused attack surface on a subscription-Owner identity.
+$prCred = az ad app federated-credential list --id $appId --query "[?name=='github-actions-pr'].id | [0]" --output tsv --only-show-errors
+if ($prCred) {
+    az ad app federated-credential delete --id $appId --federated-credential-id $prCred --only-show-errors 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Removed legacy 'github-actions-pr' federated credential (not needed; reduces attack surface)" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: Could not remove legacy 'github-actions-pr' federated credential — delete it manually" -ForegroundColor Yellow
+    }
+    $global:LASTEXITCODE = 0
+}
 
 Write-Host ""
 
