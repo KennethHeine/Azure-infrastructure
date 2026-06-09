@@ -21,10 +21,10 @@ on:
           - static-web
           - none
       location:
-        description: 'Azure region (must match the existing location in repos.json)'
+        description: 'Azure region (informational; the region is taken from repos.json "location")'
         required: false
         type: string
-        default: norwayeast
+        default: swedencentral
       auth:
         description: 'container-app only: enable Entra built-in auth'
         required: false

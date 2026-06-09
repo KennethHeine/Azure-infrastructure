@@ -1,8 +1,8 @@
 name: Decommission Repo
 
 # Tears down a repo's entire footprint: removes it from repos.json, deletes its
-# resource group, service principal, shared-ACR grants + image, and (optionally)
-# the GitHub repository itself.
+# resource group (including the repo's own ACR + images), service principal, and
+# (optionally) the GitHub repository itself.
 #
 # Destructive and irreversible — you must type the repo name into `confirm`.
 
@@ -30,9 +30,6 @@ on:
 permissions:
   id-token: write
   contents: write
-
-env:
-  SHARED_RESOURCE_GROUP: rg-shared
 
 jobs:
   decommission:
@@ -89,8 +86,7 @@ jobs:
           AUTOMATION_GITHUB_TOKEN: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
         run: |
           $decomArgs = @{
-            GitHubRepo          = '${{ inputs.name }}'
-            SharedResourceGroup = $env:SHARED_RESOURCE_GROUP
-            GitHubRepoAction    = '${{ inputs.github_repo }}'
+            GitHubRepo       = '${{ inputs.name }}'
+            GitHubRepoAction = '${{ inputs.github_repo }}'
           }
           ./scripts/decommission-repo.ps1 @decomArgs

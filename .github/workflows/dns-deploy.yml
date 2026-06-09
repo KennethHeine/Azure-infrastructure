@@ -11,6 +11,10 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  RESOURCE_GROUP: rg-dns
+  LOCATION: swedencentral
+
 jobs:
   deploy:
     name: Deploy DNS zone
@@ -33,7 +37,12 @@ jobs:
       - name: Deploy DNS Bicep
         shell: bash
         run: |
+          set -euo pipefail
+          # Create the DNS resource group if it doesn't exist (the zone itself is
+          # global; the RG just needs a location). Follows the rg-<purpose> naming.
+          az group create --name "$RESOURCE_GROUP" --location "$LOCATION" --only-show-errors >/dev/null
           az deployment group create \
-            --resource-group kscloud \
+            --resource-group "$RESOURCE_GROUP" \
             --name "dns-${{ github.run_number }}" \
-            --template-file ./dns/main.bicep
+            --template-file ./dns/main.bicep \
+            --only-show-errors

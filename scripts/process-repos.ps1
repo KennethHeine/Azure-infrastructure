@@ -3,7 +3,7 @@
 # Idempotent — safe to run multiple times. Existing resources are skipped, not duplicated.
 #
 # repos.json format:
-#   { "gitHubOrg": "KennethHeine", "location": "norwayeast", "repos": ["my-app", "my-api"] }
+#   { "gitHubOrg": "KennethHeine", "location": "swedencentral", "repos": ["my-app", "my-api"] }
 #
 # Usage:
 #   .\scripts\process-repos.ps1                      # process all repos
@@ -42,7 +42,7 @@ Write-Host ""
 $config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
 
 $gitHubOrg = if ($config.gitHubOrg) { $config.gitHubOrg } else { "KennethHeine" }
-$location = if ($config.location) { $config.location } else { "norwayeast" }
+$location = if ($config.location) { $config.location } else { "swedencentral" }
 $repos = $config.repos
 
 if ($repos.Count -eq 0) {

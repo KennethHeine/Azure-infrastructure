@@ -1,5 +1,6 @@
 // DNS Zone: kscloud.io
-// Manages the public DNS zone and all records in the 'kscloud' resource group.
+// Manages the public DNS zone and all records in the 'rg-dns' resource group
+// (created by the Deploy DNS Zone workflow).
 // NS and SOA records are auto-managed by Azure and excluded from this template.
 
 targetScope = 'resourceGroup'

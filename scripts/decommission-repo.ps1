@@ -1,15 +1,15 @@
 # Decommission a repository's Azure + GitHub footprint.
 #
 # Tears down everything the onboarding created for a single repo:
-#   1. Deletes the repo's image repository from the shared ACR
-#   2. Removes the repo SP's role assignments on the shared ACR (AcrPush + the
-#      constrained RBAC-admin delegation) — these are NOT inside rg-<repo>, so
-#      deleting the resource group doesn't remove them
-#   3. Deletes the app registration sp-<repo>-github (removes the SP + its
+#   1. Deletes the app registration sp-<repo>-github (removes the SP + its
 #      federated credentials + its rg-scoped role assignments)
-#   4. Deletes the resource group rg-<repo> (Container App, env, Log Analytics,
-#      managed identity, auth Entra app, etc.)
-#   5. (Optional) Archives (read-only) or deletes the GitHub repository
+#   2. Deletes the resource group rg-<repo> (Container App, env, Log Analytics,
+#      the repo's own ACR + images, managed identity, etc.)
+#   3. (Optional) Archives (read-only) or deletes the GitHub repository
+#
+# The repo's container registry now lives inside rg-<repo>, so it (and its
+# images) are removed when the resource group is deleted — no shared-registry
+# cleanup is needed.
 #
 # Removing the entry from repos.json is handled by the decommission workflow,
 # not this script.
@@ -29,8 +29,6 @@ param(
 
     [string]$GitHubOrg = "KennethHeine",
 
-    [string]$SharedResourceGroup = "rg-shared",
-
     # What to do with the GitHub repository after tearing down Azure:
     #   keep    -> leave it untouched (default)
     #   archive -> make it read-only (preserves the code; needs 'repo' scope)
@@ -44,7 +42,6 @@ $ErrorActionPreference = "Stop"
 $ResourceGroupName    = "rg-$GitHubRepo"
 $ServicePrincipalName = "sp-$GitHubRepo-github"
 $repoFullName         = "$GitHubOrg/$GitHubRepo"
-$imageRepo            = $GitHubRepo.ToLower()
 
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Decommission Repository Infrastructure" -ForegroundColor Cyan
@@ -71,45 +68,12 @@ $global:LASTEXITCODE = 0
 $appId = az ad app list --display-name $ServicePrincipalName --query "[0].appId" --output tsv --only-show-errors
 $global:LASTEXITCODE = 0
 
-# ─── Step 1: Delete the image from the shared ACR ────────────────────
-Write-Host "Step 1: Removing image repository '$imageRepo' from shared ACR..." -ForegroundColor Cyan
-$acrName = az acr list --resource-group $SharedResourceGroup --query "[0].name" --output tsv --only-show-errors
-$global:LASTEXITCODE = 0
-if ($acrName) {
-    az acr repository delete --name $acrName --repository $imageRepo --yes --only-show-errors 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "  Deleted image repository '$imageRepo' from '$acrName'" -ForegroundColor Green
-    } else {
-        Write-Host "  No image repository '$imageRepo' in '$acrName' (nothing to delete)" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host "  No shared ACR found in '$SharedResourceGroup' — skipping" -ForegroundColor Yellow
-}
-$global:LASTEXITCODE = 0
-Write-Host ""
-
-# ─── Step 2: Remove the SP's role assignments on the shared ACR ──────
-Write-Host "Step 2: Removing shared-ACR role assignments for the service principal..." -ForegroundColor Cyan
-if ($appId) {
-    $acrId = az acr show --name $acrName --query "id" --output tsv --only-show-errors 2>&1
-    if ($acrName -and $LASTEXITCODE -eq 0 -and $acrId) {
-        az role assignment delete --assignee $appId --scope $acrId --only-show-errors 2>&1 | Out-Null
-        Write-Host "  Removed ACR role assignments for $appId" -ForegroundColor Green
-    } else {
-        Write-Host "  No ACR found — skipping ACR role-assignment cleanup" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host "  App registration not found — nothing to clean up" -ForegroundColor Yellow
-}
-$global:LASTEXITCODE = 0
-Write-Host ""
-
-# ─── Step 2b: Delete Entra apps owned by the SP (e.g. Easy Auth app) ─
+# ─── Step 1: Delete Entra apps owned by the SP (e.g. Easy Auth app) ──
 # Container-app repos with auth create their own Entra "Easy Auth" application
 # at deploy time; the repo SP becomes its owner. That app is a directory object
 # (not inside rg-<repo>), so deleting the resource group won't remove it. Delete
 # every application this SP owns before deleting the SP itself.
-Write-Host "Step 2b: Deleting Entra apps owned by the service principal..." -ForegroundColor Cyan
+Write-Host "Step 1: Deleting Entra apps owned by the service principal..." -ForegroundColor Cyan
 if ($appId) {
     $spObjId = az ad sp list --display-name $ServicePrincipalName --query "[0].id" --output tsv --only-show-errors
     if ($spObjId) {
@@ -144,8 +108,8 @@ if ($appId) {
 $global:LASTEXITCODE = 0
 Write-Host ""
 
-# ─── Step 3: Delete the app registration (removes SP + fed creds) ────
-Write-Host "Step 3: Deleting app registration '$ServicePrincipalName'..." -ForegroundColor Cyan
+# ─── Step 2: Delete the app registration (removes SP + fed creds) ────
+Write-Host "Step 2: Deleting app registration '$ServicePrincipalName'..." -ForegroundColor Cyan
 if ($appId) {
     az ad app delete --id $appId --only-show-errors 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
@@ -159,8 +123,8 @@ if ($appId) {
 $global:LASTEXITCODE = 0
 Write-Host ""
 
-# ─── Step 4: Delete the resource group ───────────────────────────────
-Write-Host "Step 4: Deleting resource group '$ResourceGroupName'..." -ForegroundColor Cyan
+# ─── Step 3: Delete the resource group (incl. the repo's own ACR) ────
+Write-Host "Step 3: Deleting resource group '$ResourceGroupName'..." -ForegroundColor Cyan
 $rgExists = az group exists --name $ResourceGroupName --only-show-errors
 if ($rgExists -eq "true") {
     az group delete --name $ResourceGroupName --yes --only-show-errors 2>&1 | Out-Null
@@ -176,9 +140,9 @@ if ($rgExists -eq "true") {
 $global:LASTEXITCODE = 0
 Write-Host ""
 
-# ─── Step 5: Archive or delete the GitHub repository ─────────────────
+# ─── Step 4: Archive or delete the GitHub repository ─────────────────
 if ($GitHubRepoAction -ne "keep") {
-    Write-Host "Step 5: $($GitHubRepoAction)ing GitHub repository '$repoFullName'..." -ForegroundColor Cyan
+    Write-Host "Step 4: $($GitHubRepoAction)ing GitHub repository '$repoFullName'..." -ForegroundColor Cyan
     $ghToken = $env:AUTOMATION_GITHUB_TOKEN
     if (-not $ghToken) {
         Write-Host "  WARNING: AUTOMATION_GITHUB_TOKEN not set — cannot $GitHubRepoAction GitHub repo" -ForegroundColor Yellow
@@ -211,7 +175,7 @@ Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Decommission Complete" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Removed: rg-$GitHubRepo, $ServicePrincipalName, shared-ACR grants + image" -ForegroundColor Green
+Write-Host "Removed: rg-$GitHubRepo (incl. its ACR + images), $ServicePrincipalName" -ForegroundColor Green
 switch ($GitHubRepoAction) {
     "keep"    { Write-Host "The GitHub repository '$repoFullName' was kept." -ForegroundColor Cyan }
     "archive" { Write-Host "The GitHub repository '$repoFullName' was archived (read-only)." -ForegroundColor Cyan }
