@@ -1,0 +1,176 @@
+name: Container App — Deploy App (reusable)
+
+# Reusable app-deploy workflow for every container-app repo. Builds the app image
+# (and any extra images, e.g. a sidecar/runner image) with `az acr build` — the
+# build runs inside ACR in the cloud, so the GitHub runner needs no Docker daemon
+# and the build runs next to the registry. Then it points the Container App at the
+# freshly built image.
+#
+# Thin caller (app image only):
+#   jobs:
+#     deploy:
+#       uses: KennethHeine/Azure-infrastructure/.github/workflows/container-app-deploy-app.yml@main
+#       secrets: inherit
+#
+# Caller that also builds extra images (each built as a separate parallel job):
+#   jobs:
+#     deploy:
+#       uses: KennethHeine/Azure-infrastructure/.github/workflows/container-app-deploy-app.yml@main
+#       secrets: inherit
+#       with:
+#         extra_images: '[{"suffix":"-runner","dockerfile":"Dockerfile","context":"runner"}]'
+#
+# extra_images is a JSON array; for each entry the image is pushed as
+# <repo><suffix>:<sha> and <repo><suffix>:latest, built from <context> using
+# <dockerfile> (dockerfile path is relative to context).
+
+on:
+  workflow_call:
+    inputs:
+      extra_images:
+        description: 'JSON array of extra images to build: [{"suffix","dockerfile","context"}]'
+        type: string
+        required: false
+        default: '[]'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Derive the resource group / app name and discover this repo's own ACR once;
+  # every other job consumes these outputs.
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      resourceGroup: ${{ steps.derive.outputs.resourceGroup }}
+      containerAppName: ${{ steps.derive.outputs.containerAppName }}
+      acrName: ${{ steps.derive.outputs.acrName }}
+      acrLoginServer: ${{ steps.derive.outputs.acrLoginServer }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Derive names and discover ACR
+        id: derive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RESOURCE_GROUP='${{ vars.RESOURCE_GROUP }}'
+          if [ -z "$RESOURCE_GROUP" ]; then
+            RESOURCE_GROUP="rg-${{ github.event.repository.name }}"
+          fi
+          # appName defaults to the repo name (sanitized) unless parameters.json overrides.
+          APP_NAME=$(jq -r '.parameters.appName.value // "app"' infra/main.parameters.json)
+          if [ -z "$APP_NAME" ] || [ "$APP_NAME" = "null" ] || [ "$APP_NAME" = "app" ]; then
+            APP_NAME=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//' | cut -c1-28 | sed 's/-$//')
+          fi
+          CONTAINER_APP_NAME="ca-${APP_NAME}"
+
+          # This repo has exactly one ACR (its own, in this resource group),
+          # created by deploy-infra. Discover it rather than relying on repo vars.
+          ACR_NAME=$(az acr list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+          ACR_LOGIN_SERVER=$(az acr list -g "$RESOURCE_GROUP" --query "[0].loginServer" -o tsv)
+          if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
+            echo "::error::No ACR found in '$RESOURCE_GROUP'. Run Deploy Infrastructure first."
+            exit 1
+          fi
+
+          echo "resourceGroup=$RESOURCE_GROUP" >> "$GITHUB_OUTPUT"
+          echo "containerAppName=$CONTAINER_APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "acrName=$ACR_NAME" >> "$GITHUB_OUTPUT"
+          echo "acrLoginServer=$ACR_LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+
+  # Build + push the primary app image (cloud build in ACR).
+  build-app:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build app image
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO='${{ github.event.repository.name }}'
+          az acr build \
+            --registry '${{ needs.setup.outputs.acrName }}' \
+            --image "${REPO}:${{ github.sha }}" \
+            --image "${REPO}:latest" \
+            --file Dockerfile .
+
+  # Build + push any extra images (e.g. a per-session runner image), one parallel
+  # job per entry. Skipped entirely when the caller passes no extra_images.
+  build-extra:
+    needs: setup
+    if: ${{ inputs.extra_images != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: ${{ fromJSON(inputs.extra_images) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build extra image
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO='${{ github.event.repository.name }}'
+          SUFFIX='${{ matrix.image.suffix }}'
+          az acr build \
+            --registry '${{ needs.setup.outputs.acrName }}' \
+            --image "${REPO}${SUFFIX}:${{ github.sha }}" \
+            --image "${REPO}${SUFFIX}:latest" \
+            --file '${{ matrix.image.dockerfile }}' \
+            '${{ matrix.image.context }}'
+
+  # Point the Container App at the freshly built app image. Runs once all builds
+  # are done; tolerates build-extra being skipped (no extra images).
+  deploy:
+    needs: [setup, build-app, build-extra]
+    if: ${{ always() && needs.build-app.result == 'success' && (needs.build-extra.result == 'success' || needs.build-extra.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update Container App
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO='${{ github.event.repository.name }}'
+          IMAGE='${{ needs.setup.outputs.acrLoginServer }}/'"${REPO}:${{ github.sha }}"
+          echo "Updating ${{ needs.setup.outputs.containerAppName }} with image $IMAGE"
+          az containerapp update \
+            --name '${{ needs.setup.outputs.containerAppName }}' \
+            --resource-group '${{ needs.setup.outputs.resourceGroup }}' \
+            --image "$IMAGE" \
+            --only-show-errors
