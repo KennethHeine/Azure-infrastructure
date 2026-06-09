@@ -1,0 +1,180 @@
+name: Static Web — Deploy (reusable)
+
+# Reusable build + deploy workflow for every static-web repo. Builds the app and
+# deploys it to Azure Static Web Apps, fetching the SWA deployment token at deploy
+# time via OIDC (no AZURE_STATIC_WEB_APPS_API_TOKEN secret to store). Production on
+# push/dispatch; per-PR preview environments on pull_request (closed on PR close).
+#
+# Thin caller:
+#   jobs:
+#     deploy:
+#       uses: KennethHeine/Azure-infrastructure/.github/workflows/static-web-deploy.yml@main
+#       secrets: inherit
+#       with:
+#         app_dir: static-web-app
+#         test_command: 'npm run lint && npm run format:check && npm test'
+#         run_e2e: true
+
+on:
+  workflow_call:
+    inputs:
+      app_dir:
+        description: 'Directory holding the npm app (build emits <app_dir>/out).'
+        type: string
+        required: false
+        default: 'web'
+      resource_group:
+        description: 'Resource group with the Static Web App. Falls back to vars.RESOURCE_GROUP then rg-<repo>.'
+        type: string
+        required: false
+        default: ''
+      test_command:
+        description: 'Optional command run before build (e.g. "npm run lint && npm test"). Empty = skip.'
+        type: string
+        required: false
+        default: ''
+      run_e2e:
+        description: 'Run Playwright e2e (npm run test:e2e) before build.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Build the static site, optionally gate on tests/e2e, then deploy. On
+  # pull_request the SWA action targets a per-PR preview environment; on push to
+  # main it deploys production. The deploy steps are skipped for Dependabot (the
+  # gate still runs so dependabot-auto-merge sees a green run).
+  build_and_deploy:
+    name: Build and deploy
+    if: ${{ github.event_name != 'pull_request' || github.event.action != 'closed' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: '${{ inputs.app_dir }}/.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: '${{ inputs.app_dir }}/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.app_dir }}
+        run: npm ci
+
+      - name: Test gate
+        if: ${{ inputs.test_command != '' }}
+        working-directory: ${{ inputs.app_dir }}
+        run: ${{ inputs.test_command }}
+
+      - name: Cache Playwright browsers
+        if: ${{ inputs.run_e2e }}
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles(format('{0}/package-lock.json', inputs.app_dir)) }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        if: ${{ inputs.run_e2e && steps.playwright-cache.outputs.cache-hit != 'true' }}
+        working-directory: ${{ inputs.app_dir }}
+        run: npx playwright install chromium --with-deps
+
+      - name: Install Playwright system deps (cache hit)
+        if: ${{ inputs.run_e2e && steps.playwright-cache.outputs.cache-hit == 'true' }}
+        working-directory: ${{ inputs.app_dir }}
+        run: npx playwright install-deps chromium
+
+      - name: Run e2e tests
+        if: ${{ inputs.run_e2e }}
+        working-directory: ${{ inputs.app_dir }}
+        run: npm run test:e2e
+
+      - name: Build (static export)
+        working-directory: ${{ inputs.app_dir }}
+        run: npm run build
+
+      # --- Deploy (skipped for Dependabot PRs; the gate above still ran) ---
+      - name: Azure login (OIDC)
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch SWA deployment token
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        id: swa
+        shell: bash
+        run: |
+          set -euo pipefail
+          RG='${{ inputs.resource_group }}'
+          [ -z "$RG" ] && RG='${{ vars.RESOURCE_GROUP }}'
+          [ -z "$RG" ] && RG="rg-${{ github.event.repository.name }}"
+          name=$(az staticwebapp list --resource-group "$RG" --query "[0].name" -o tsv)
+          if [ -z "$name" ]; then
+            echo "::error::No Static Web App found in '$RG'. Run Deploy Infrastructure first."
+            exit 1
+          fi
+          token=$(az staticwebapp secrets list --name "$name" --resource-group "$RG" --query "properties.apiKey" -o tsv)
+          if [ -z "$token" ]; then echo "::error::Could not fetch deployment token for $name."; exit 1; fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Azure Static Web Apps
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: '${{ inputs.app_dir }}/out'
+          config_file_location: '${{ inputs.app_dir }}/out'
+          skip_app_build: true
+          # Empty for push (production); per-PR preview environment on pull_request.
+          deployment_environment: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || '' }}
+
+  # Tear down a PR's preview environment when the PR is closed.
+  close_preview:
+    name: Close preview environment
+    if: ${{ github.event_name == 'pull_request' && github.event.action == 'closed' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch SWA deployment token
+        id: swa
+        shell: bash
+        run: |
+          set -euo pipefail
+          RG='${{ inputs.resource_group }}'
+          [ -z "$RG" ] && RG='${{ vars.RESOURCE_GROUP }}'
+          [ -z "$RG" ] && RG="rg-${{ github.event.repository.name }}"
+          name=$(az staticwebapp list --resource-group "$RG" --query "[0].name" -o tsv)
+          token=$(az staticwebapp secrets list --name "$name" --resource-group "$RG" --query "properties.apiKey" -o tsv)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Close preview environment
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
+          action: 'close'
+          deployment_environment: 'pr-${{ github.event.pull_request.number }}'
