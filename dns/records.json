@@ -10,8 +10,8 @@
     { "type": "TXT",   "name": "asuid.claude",           "ttl": 3600, "values": ["BF866F688DE63855C1E584D7CFEA69698949BBD2BF44A5F478CDA1198B1D5023"] },
     { "type": "MX",    "name": "@",                      "ttl": 3600, "values": ["0 kscloud-io.mail.protection.outlook.com"] },
     { "type": "TXT",   "name": "@",                      "ttl": 3600, "values": ["v=spf1 include:spf.protection.outlook.com -all"] },
-    { "type": "CNAME", "name": "selector1._domainkey",   "ttl": 3600, "values": ["selector1-kscloud-io._domainkey.KSCloudSolutionsApS.onmicrosoft.com"] },
-    { "type": "CNAME", "name": "selector2._domainkey",   "ttl": 3600, "values": ["selector2-kscloud-io._domainkey.KSCloudSolutionsApS.onmicrosoft.com"] },
+    { "type": "CNAME", "name": "selector1._domainkey",   "ttl": 3600, "values": ["selector1-kscloud-io._domainkey.KSCloudSolutionsApS.r-v1.dkim.mail.microsoft"] },
+    { "type": "CNAME", "name": "selector2._domainkey",   "ttl": 3600, "values": ["selector2-kscloud-io._domainkey.KSCloudSolutionsApS.r-v1.dkim.mail.microsoft"] },
     { "type": "TXT",   "name": "_dmarc",                 "ttl": 3600, "values": ["v=DMARC1; p=none; rua=mailto:kenneth@kscloud.io"] }
   ]
 }
