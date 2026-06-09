@@ -1,21 +1,25 @@
 // DNS Zone: kscloud.io (data-driven)
 //
-// The zone's records are declared in dns/records.json (the single source of
-// truth) and projected into Azure DNS record sets by the loops below. Add or
-// remove records with the Add DNS Record / Remove DNS Record workflows — they
-// edit records.json and push, which triggers the Deploy DNS Zone workflow.
+// The zone's records are split across two source files and projected into Azure
+// DNS record sets (the loops below operate on their UNION):
+//   - records.platform.json : mail / M365 foundation (MX, SPF, DKIM, DMARC,
+//                             autodiscover, enrollment). Carries the canonical
+//                             zoneName. Changed via PR only — high blast radius.
+//   - records.app.json      : app custom domains (CNAMEs + validation TXTs).
+//                             Edited by the Add/Remove DNS Record workflows.
 //
 // NOTE: ARM incremental deployments never delete records dropped from the
 // template, so the Deploy DNS Zone workflow runs a reconcile/prune step after
-// this deployment to delete any record set in the zone that is no longer in
-// records.json. NS and SOA at the apex are Azure-managed and excluded here.
+// this deployment to delete any record set in the zone that is in neither file.
+// NS and SOA at the apex are Azure-managed and excluded here.
 
 targetScope = 'resourceGroup'
 
-// ─── Records: single source of truth ─────────────────────────────────
-var config = loadJsonContent('records.json')
-var zoneName = config.zoneName
-var records = config.records
+// ─── Records: union of the platform + app source files ────────────────
+var platform = loadJsonContent('records.platform.json')
+var app = loadJsonContent('records.app.json')
+var zoneName = platform.zoneName
+var records = concat(platform.records, app.records)
 
 // Partition by type — each Azure DNS record-set type is its own resource type.
 var aRecords = filter(records, r => r.type == 'A')

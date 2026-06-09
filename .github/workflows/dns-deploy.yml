@@ -47,18 +47,19 @@ jobs:
             --template-file ./dns/main.bicep \
             --only-show-errors
 
-      - name: Reconcile (prune records no longer in records.json)
+      - name: Reconcile (prune records in neither record file)
         shell: bash
         run: |
           set -euo pipefail
           # ARM incremental deployments add/update records but NEVER delete records
-          # dropped from the template. This step makes dns/records.json fully
-          # authoritative: any record set in the zone that is not declared in
-          # records.json is deleted. The Azure-managed apex SOA and NS records are
-          # always preserved. Records added directly in the portal (i.e. not in
-          # records.json) will be pruned here — keep records.json the source of truth.
-          ZONE=$(jq -r '.zoneName' dns/records.json)
-          desired=$(jq -r '.records[] | "\(.type) \(.name)"' dns/records.json | sort -u)
+          # dropped from the template. This step makes the UNION of the two source
+          # files (records.platform.json + records.app.json) fully authoritative:
+          # any record set in the zone that is in neither file is deleted. The
+          # Azure-managed apex SOA and NS records are always preserved. Records
+          # added directly in the portal (i.e. in neither file) will be pruned
+          # here — keep the two record files the source of truth.
+          ZONE=$(jq -r '.zoneName' dns/records.platform.json)
+          desired=$(jq -r '.records[] | "\(.type) \(.name)"' dns/records.platform.json dns/records.app.json | sort -u)
           echo "Desired record sets:"; echo "$desired" | sed 's/^/  /'
 
           az network dns record-set list -g "$RESOURCE_GROUP" -z "$ZONE" \
@@ -70,7 +71,7 @@ jobs:
             if [ "$rtype_uc" = "SOA" ]; then continue; fi
             if [ "$rtype_uc" = "NS" ] && [ "$rsname" = "@" ]; then continue; fi
             if grep -qxF "$rtype_uc $rsname" <<< "$desired"; then continue; fi
-            echo "Pruning $rtype_uc record '$rsname' (not in records.json)"
+            echo "Pruning $rtype_uc record '$rsname' (in neither record file)"
             az network dns record-set "$(echo "$rtype_uc" | tr '[:upper:]' '[:lower:]')" delete \
               -g "$RESOURCE_GROUP" -z "$ZONE" -n "$rsname" --yes --only-show-errors
           done

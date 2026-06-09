@@ -1,12 +1,14 @@
 name: Remove DNS Record
 
-# One-click: remove a record from the kscloud.io zone. This edits
-# dns/records.json (removing the matching type+name entry) and pushes to main —
+# One-click: remove an APP record from the kscloud.io zone. This edits
+# dns/records.app.json (removing the matching type+name entry) and pushes to main —
 # which triggers the Deploy DNS Zone workflow. That workflow's reconcile step
 # then deletes the record set from Azure DNS (ARM incremental deploys never
 # delete on their own).
 #
-# records.json is the single source of truth; never edit the zone by hand.
+# Scope: this workflow only touches records.app.json (app custom domains). The
+# platform/mail records (MX, SPF, DKIM, DMARC, ...) live in records.platform.json
+# and are changed via PR only. Never edit the zone by hand.
 
 on:
   workflow_dispatch:
@@ -31,7 +33,7 @@ permissions:
 
 jobs:
   remove:
-    name: Remove record from records.json
+    name: Remove record from records.app.json
     runs-on: ubuntu-latest
     steps:
       # Check out with the automation PAT so the push triggers Deploy DNS Zone.
@@ -40,24 +42,24 @@ jobs:
         with:
           token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
 
-      - name: Remove record from dns/records.json
+      - name: Remove record from dns/records.app.json
         shell: bash
         env:
           TYPE: ${{ inputs.type }}
           NAME: ${{ inputs.name }}
         run: |
           set -euo pipefail
-          before=$(jq '.records | length' dns/records.json)
+          before=$(jq '.records | length' dns/records.app.json)
           jq --arg t "$TYPE" --arg n "$NAME" '
             .records = [ .records[] | select((.type == $t and .name == $n) | not) ]
-          ' dns/records.json > dns/records.tmp
-          mv dns/records.tmp dns/records.json
-          after=$(jq '.records | length' dns/records.json)
+          ' dns/records.app.json > dns/records.tmp
+          mv dns/records.tmp dns/records.app.json
+          after=$(jq '.records | length' dns/records.app.json)
           echo "records: $before -> $after"
           if [ "$before" = "$after" ]; then
-            echo "::warning::No matching $TYPE record named '$NAME' found in records.json."
+            echo "::warning::No matching $TYPE record named '$NAME' found in records.app.json."
           fi
-          cat dns/records.json
+          cat dns/records.app.json
 
       - name: Commit and push (triggers Deploy DNS Zone)
         shell: bash
@@ -68,9 +70,9 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add dns/records.json
+          git add dns/records.app.json
           if git diff --cached --quiet; then
-            echo "::notice::Nothing to remove — records.json unchanged."
+            echo "::notice::Nothing to remove — records.app.json unchanged."
             exit 0
           fi
           git commit -m "DNS: remove $TYPE record '$NAME' from kscloud.io"

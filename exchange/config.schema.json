@@ -13,7 +13,7 @@
     },
     "dkim": {
       "type": "array",
-      "description": "Desired DKIM signing state per accepted domain. A config is created if missing (disabled), then its Enabled flag is reconciled to match. Enabling requires the selector CNAMEs to already resolve (see dns/records.json); until then the domain stays pending and is retried on the next run.",
+      "description": "Desired DKIM signing state per accepted domain. A config is created if missing (disabled), then its Enabled flag is reconciled to match. Enabling requires the selector CNAMEs to already resolve (see dns/records.platform.json); until then the domain stays pending and is retried on the next run.",
       "items": {
         "type": "object",
         "required": ["domain", "enabled"],

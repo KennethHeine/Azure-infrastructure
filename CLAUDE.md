@@ -174,8 +174,16 @@ includes the repo's own ACR + images), the SP, **any Entra apps the SP owns
 `AUTOMATION_GITHUB_TOKEN`).
 
 ### Manage DNS records (kscloud.io)
-`dns/records.json` is the **single source of truth** for the zone; `dns/main.bicep`
-projects it into Azure DNS record sets (looped by type). Add or remove records
+The zone's records are split across **two source files** by blast radius, and
+`dns/main.bicep` projects their **union** into Azure DNS record sets (looped by
+type):
+
+| File | Holds | Changed via |
+|------|-------|-------------|
+| `dns/records.platform.json` | mail / M365 foundation (MX, SPF, DKIM, DMARC, autodiscover, enrollment). Carries the canonical `zoneName`. | **PR only** — high blast radius |
+| `dns/records.app.json` | app custom domains (CNAMEs + validation TXTs). No `zoneName`. | the Add/Remove DNS Record workflows |
+
+So app-record churn can't touch the mail records. Add or remove **app** records
 with the workflows — never edit the zone by hand:
 ```bash
 gh workflow run add-dns-record.yml --repo KennethHeine/Azure-infrastructure \
@@ -183,10 +191,11 @@ gh workflow run add-dns-record.yml --repo KennethHeine/Azure-infrastructure \
 gh workflow run remove-dns-record.yml --repo KennethHeine/Azure-infrastructure \
   -f type=CNAME -f name=blog
 ```
-Each edits `records.json` and pushes (via `AUTOMATION_GITHUB_TOKEN`), triggering
-**Deploy DNS Zone**. That workflow applies the Bicep and then **reconciles**:
+Each edits `records.app.json` and pushes (via `AUTOMATION_GITHUB_TOKEN`),
+triggering **Deploy DNS Zone**. Platform/mail records are edited by PR to
+`records.platform.json`. That workflow applies the Bicep and then **reconciles**:
 because ARM incremental deploys never delete, a prune step removes any record set
-in the zone not present in `records.json` (apex `NS`/`SOA` are always preserved).
+in the zone present in **neither** file (apex `NS`/`SOA` are always preserved).
 MX values are `'<preference> <exchange>'` (e.g. `0 mail.example.com`).
 
 ### Manage Exchange Online (mail tenant)
@@ -212,7 +221,7 @@ Reconciliation is **additive** (unlike the DNS pruner): only domains listed in
 `config.json` are touched; an unlisted domain is never disabled. A domain whose
 selector CNAMEs haven't propagated yet can't be enabled (EXO reports `CnameMissing`)
 — that's reported as **pending**, not a failure, and self-heals on the next run. DKIM
-needs both halves: the selector CNAMEs in `dns/records.json` **and** the enable here.
+needs both halves: the selector CNAMEs in `dns/records.platform.json` **and** the enable here.
 
 ## The automation token
 
@@ -229,9 +238,9 @@ URL, validates, writes the secret, optionally re-runs onboarding).
 | `onboard-repos.yml` | push to `repos.json` on main, manual | Provision/refresh all repos |
 | `add-repo.yml` | manual (inputs) | Add an entry to repos.json → triggers onboarding |
 | `decommission-repo.yml` | manual (inputs + confirm) | Full teardown of one repo |
-| `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone (creates `rg-dns`); applies `dns/records.json` then prunes stale records |
-| `add-dns-record.yml` | manual (inputs) | Upsert a record in `dns/records.json` → triggers Deploy DNS Zone |
-| `remove-dns-record.yml` | manual (inputs) | Remove a record from `dns/records.json` → triggers Deploy DNS Zone |
+| `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone (creates `rg-dns`); applies the union of `dns/records.platform.json` + `dns/records.app.json` then prunes stale records |
+| `add-dns-record.yml` | manual (inputs) | Upsert an app record in `dns/records.app.json` → triggers Deploy DNS Zone |
+| `remove-dns-record.yml` | manual (inputs) | Remove an app record from `dns/records.app.json` → triggers Deploy DNS Zone |
 | `exchange-deploy.yml` | push to `exchange/**`, manual | Reconcile Exchange Online config (DKIM signing) from `exchange/config.json`, app-only via the OIDC SP |
 
 ## Required secrets (on this repo)
