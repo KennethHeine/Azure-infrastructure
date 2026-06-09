@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "kscloud.io DNS records",
+  "description": "Source of truth for the kscloud.io Azure DNS zone. Edited by the Add/Remove DNS Record workflows and projected into Azure by dns/main.bicep.",
+  "type": "object",
+  "required": ["zoneName", "records"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "zoneName": { "type": "string", "description": "DNS zone (apex) name, e.g. kscloud.io" },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "name", "ttl", "values"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "enum": ["A", "CNAME", "TXT", "MX"],
+            "description": "DNS record type (NS and SOA are Azure-managed and must not be listed here)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Record name relative to the zone, or '@' for the apex"
+          },
+          "ttl": { "type": "integer", "minimum": 1, "description": "Time to live in seconds" },
+          "values": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" },
+            "description": "Record values. A=IPv4 address, CNAME=single target host, TXT=text string, MX='<preference> <exchange>' e.g. '0 mail.example.com'"
+          }
+        }
+      }
+    }
+  }
+}

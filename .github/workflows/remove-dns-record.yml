@@ -1,0 +1,81 @@
+name: Remove DNS Record
+
+# One-click: remove a record from the kscloud.io zone. This edits
+# dns/records.json (removing the matching type+name entry) and pushes to main —
+# which triggers the Deploy DNS Zone workflow. That workflow's reconcile step
+# then deletes the record set from Azure DNS (ARM incremental deploys never
+# delete on their own).
+#
+# records.json is the single source of truth; never edit the zone by hand.
+
+on:
+  workflow_dispatch:
+    inputs:
+      type:
+        description: 'Record type'
+        required: true
+        type: choice
+        default: CNAME
+        options:
+          - A
+          - CNAME
+          - TXT
+          - MX
+      name:
+        description: "Record name relative to the zone (use '@' for the apex)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  remove:
+    name: Remove record from records.json
+    runs-on: ubuntu-latest
+    steps:
+      # Check out with the automation PAT so the push triggers Deploy DNS Zone.
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
+
+      - name: Remove record from dns/records.json
+        shell: bash
+        env:
+          TYPE: ${{ inputs.type }}
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          before=$(jq '.records | length' dns/records.json)
+          jq --arg t "$TYPE" --arg n "$NAME" '
+            .records = [ .records[] | select((.type == $t and .name == $n) | not) ]
+          ' dns/records.json > dns/records.tmp
+          mv dns/records.tmp dns/records.json
+          after=$(jq '.records | length' dns/records.json)
+          echo "records: $before -> $after"
+          if [ "$before" = "$after" ]; then
+            echo "::warning::No matching $TYPE record named '$NAME' found in records.json."
+          fi
+          cat dns/records.json
+
+      - name: Commit and push (triggers Deploy DNS Zone)
+        shell: bash
+        env:
+          TYPE: ${{ inputs.type }}
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dns/records.json
+          if git diff --cached --quiet; then
+            echo "::notice::Nothing to remove — records.json unchanged."
+            exit 0
+          fi
+          git commit -m "DNS: remove $TYPE record '$NAME' from kscloud.io"
+          git push
+          {
+            echo "### Removed DNS record \`$TYPE $NAME\`"
+            echo "Watch the **Deploy DNS Zone** workflow — its reconcile step deletes it from Azure."
+          } >> "$GITHUB_STEP_SUMMARY"

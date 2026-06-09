@@ -118,6 +118,22 @@ includes the repo's own ACR + images), the SP, **any Entra apps the SP owns
 `pwsh ./scripts/process-repos.ps1 -ConfigFile ./repos.json` (needs `az login` +
 `AUTOMATION_GITHUB_TOKEN`).
 
+### Manage DNS records (kscloud.io)
+`dns/records.json` is the **single source of truth** for the zone; `dns/main.bicep`
+projects it into Azure DNS record sets (looped by type). Add or remove records
+with the workflows — never edit the zone by hand:
+```bash
+gh workflow run add-dns-record.yml --repo KennethHeine/Azure-infrastructure \
+  -f type=CNAME -f name=blog -f value=my-site.azurestaticapps.net
+gh workflow run remove-dns-record.yml --repo KennethHeine/Azure-infrastructure \
+  -f type=CNAME -f name=blog
+```
+Each edits `records.json` and pushes (via `AUTOMATION_GITHUB_TOKEN`), triggering
+**Deploy DNS Zone**. That workflow applies the Bicep and then **reconciles**:
+because ARM incremental deploys never delete, a prune step removes any record set
+in the zone not present in `records.json` (apex `NS`/`SOA` are always preserved).
+MX values are `'<preference> <exchange>'` (e.g. `0 mail.example.com`).
+
 ## The automation token
 
 `AUTOMATION_GITHUB_TOKEN` (repo secret) is a classic PAT with `repo` (+ `workflow`,
@@ -133,7 +149,9 @@ URL, validates, writes the secret, optionally re-runs onboarding).
 | `onboard-repos.yml` | push to `repos.json` on main, manual | Provision/refresh all repos |
 | `add-repo.yml` | manual (inputs) | Add an entry to repos.json → triggers onboarding |
 | `decommission-repo.yml` | manual (inputs + confirm) | Full teardown of one repo |
-| `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone (creates `rg-dns`) |
+| `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone (creates `rg-dns`); applies `dns/records.json` then prunes stale records |
+| `add-dns-record.yml` | manual (inputs) | Upsert a record in `dns/records.json` → triggers Deploy DNS Zone |
+| `remove-dns-record.yml` | manual (inputs) | Remove a record from `dns/records.json` → triggers Deploy DNS Zone |
 
 ## Required secrets (on this repo)
 
