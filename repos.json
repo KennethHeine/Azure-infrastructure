@@ -4,7 +4,6 @@
   "location": "swedencentral",
   "repos": [
     "football-tournament",
-    "test-repo",
     {
       "name": "article-to-speech",
       "template": "container-app",
