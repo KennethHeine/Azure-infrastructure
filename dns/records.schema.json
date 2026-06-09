@@ -1,13 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "kscloud.io DNS records",
-  "description": "Source of truth for the kscloud.io Azure DNS zone. Edited by the Add/Remove DNS Record workflows and projected into Azure by dns/main.bicep.",
+  "description": "Shared schema for the kscloud.io zone record files. The zone is split into two source files, both projected into Azure by dns/main.bicep (which deploys their union): records.platform.json (mail / M365 foundation — carries the canonical zoneName, changed via PR only) and records.app.json (app custom domains — no zoneName, edited by the Add/Remove DNS Record workflows).",
   "type": "object",
-  "required": ["zoneName", "records"],
+  "required": ["records"],
   "additionalProperties": false,
   "properties": {
     "$schema": { "type": "string" },
-    "zoneName": { "type": "string", "description": "DNS zone (apex) name, e.g. kscloud.io" },
+    "zoneName": { "type": "string", "description": "DNS zone (apex) name, e.g. kscloud.io. Declared once, in records.platform.json (the canonical source); omitted from records.app.json." },
     "records": {
       "type": "array",
       "items": {

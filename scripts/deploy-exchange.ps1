@@ -24,7 +24,7 @@
     Reconciliation is ADDITIVE: only domains listed in config.json are touched. A
     domain whose DKIM CNAMEs have not yet propagated cannot be enabled (Exchange
     reports CnameMissing); that is treated as "pending", not an error, so the run is
-    green and self-heals on the next run once dns/records.json has propagated.
+    green and self-heals on the next run once dns/records.platform.json has propagated.
 
 .PARAMETER ConfigFile
     Path to the Exchange config JSON. Defaults to ./exchange/config.json.

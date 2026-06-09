@@ -1,11 +1,13 @@
 name: Add DNS Record
 
-# One-click: add (or update) a record in the kscloud.io zone. This edits
-# dns/records.json and pushes to main — which triggers the Deploy DNS Zone
+# One-click: add (or update) an APP record in the kscloud.io zone. This edits
+# dns/records.app.json and pushes to main — which triggers the Deploy DNS Zone
 # workflow to apply it. Upsert semantics: if a record with the same type+name
 # already exists, its value is replaced.
 #
-# records.json is the single source of truth; never edit the zone by hand.
+# Scope: this workflow only touches records.app.json (app custom domains). The
+# platform/mail records (MX, SPF, DKIM, DMARC, ...) live in records.platform.json
+# and are changed via PR only. Never edit the zone by hand.
 
 on:
   workflow_dispatch:
@@ -39,7 +41,7 @@ permissions:
 
 jobs:
   add:
-    name: Add record to records.json
+    name: Add record to records.app.json
     runs-on: ubuntu-latest
     steps:
       # Check out with the automation PAT so the push triggers Deploy DNS Zone.
@@ -49,7 +51,7 @@ jobs:
         with:
           token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
 
-      - name: Upsert record in dns/records.json
+      - name: Upsert record in dns/records.app.json
         shell: bash
         env:
           TYPE: ${{ inputs.type }}
@@ -73,10 +75,10 @@ jobs:
           # Upsert: drop any existing record with the same type+name, then append.
           jq --argjson e "$ENTRY" --arg t "$TYPE" --arg n "$NAME" '
             .records = ([ .records[] | select((.type == $t and .name == $n) | not) ] + [$e])
-          ' dns/records.json > dns/records.tmp
-          mv dns/records.tmp dns/records.json
+          ' dns/records.app.json > dns/records.tmp
+          mv dns/records.tmp dns/records.app.json
 
-          echo "Resulting records.json:"; cat dns/records.json
+          echo "Resulting records.app.json:"; cat dns/records.app.json
 
       - name: Commit and push (triggers Deploy DNS Zone)
         shell: bash
@@ -87,9 +89,9 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add dns/records.json
+          git add dns/records.app.json
           if git diff --cached --quiet; then
-            echo "::notice::records.json unchanged — '$TYPE $NAME' already present with this value."
+            echo "::notice::records.app.json unchanged — '$TYPE $NAME' already present with this value."
             exit 0
           fi
           git commit -m "DNS: add $TYPE record '$NAME' to kscloud.io"
