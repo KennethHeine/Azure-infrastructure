@@ -1,0 +1,14 @@
+{
+  "$schema": "./providers.schema.json",
+  "providers": [
+    "Microsoft.App",
+    "Microsoft.ContainerInstance",
+    "Microsoft.ContainerRegistry",
+    "Microsoft.ManagedIdentity",
+    "Microsoft.OperationalInsights",
+    "Microsoft.Storage",
+    "Microsoft.Web",
+    "Microsoft.Network",
+    "Microsoft.Insights"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Azure resource provider registration configuration",
+  "description": "Subscription-level resource providers that must be registered before the estate's repos can deploy their Bicep. Registered idempotently by scripts/register-providers.ps1 during onboarding.",
+  "type": "object",
+  "required": ["providers"],
+  "properties": {
+    "providers": {
+      "type": "array",
+      "description": "Resource provider namespaces to ensure are registered on the subscription.",
+      "items": {
+        "type": "string",
+        "pattern": "^[Mm]icrosoft\\.[A-Za-z]+$",
+        "description": "Resource provider namespace, e.g. Microsoft.ContainerInstance"
+      },
+      "uniqueItems": true
+    }
+  }
+}

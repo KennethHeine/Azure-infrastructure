@@ -12,6 +12,7 @@ secrets are stored anywhere.**
 ```
 repos.json  ──push to main──►  Onboard Repositories workflow
                                    └─ scripts/process-repos.ps1
+                                        ├─ scripts/register-providers.ps1          (once: providers.json)
                                         └─ scripts/create-repo-infrastructure.ps1  (per repo)
                                              ├─ rg-<repo>                    (resource group)
                                              ├─ sp-<repo>-github             (Entra app + SP)
@@ -47,6 +48,23 @@ template) or an object selecting a template:
 `template`: `container-app` | `static-web` | `none`. `auth` (container-app only,
 default **true**) toggles Entra built-in auth. Schema: `repos.schema.json`.
 Onboarding is **idempotent** — re-running never duplicates resources.
+
+## Config: `providers.json`
+
+The subscription-level **resource providers** the estate needs (Container Apps,
+Container Instances, ACR, Storage, Log Analytics, Managed Identity, Static Web
+Apps, DNS, Insights). A provider that isn't registered fails only at *deploy
+time* with `The subscription is not registered to use namespace '...'` — e.g. the
+`claude-runner` app couldn't start its per-session ACI until
+`Microsoft.ContainerInstance` was registered. Keeping the list here puts that
+under code control.
+
+`scripts/register-providers.ps1` reads `providers.json` and registers any that
+aren't already registered (idempotent; waits for completion unless `-NoWait`).
+`process-repos.ps1` calls it **once at the start of onboarding** — before any
+repo is processed — so a repo's first Bicep deploy never trips over an
+unregistered provider. Add a namespace to `providers.json` whenever a template
+starts using a new Azure resource type. Schema: `providers.schema.json`.
 
 ## Templates (GitHub template repositories)
 
