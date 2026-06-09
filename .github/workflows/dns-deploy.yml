@@ -46,3 +46,32 @@ jobs:
             --name "dns-${{ github.run_number }}" \
             --template-file ./dns/main.bicep \
             --only-show-errors
+
+      - name: Reconcile (prune records no longer in records.json)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # ARM incremental deployments add/update records but NEVER delete records
+          # dropped from the template. This step makes dns/records.json fully
+          # authoritative: any record set in the zone that is not declared in
+          # records.json is deleted. The Azure-managed apex SOA and NS records are
+          # always preserved. Records added directly in the portal (i.e. not in
+          # records.json) will be pruned here — keep records.json the source of truth.
+          ZONE=$(jq -r '.zoneName' dns/records.json)
+          desired=$(jq -r '.records[] | "\(.type) \(.name)"' dns/records.json | sort -u)
+          echo "Desired record sets:"; echo "$desired" | sed 's/^/  /'
+
+          az network dns record-set list -g "$RESOURCE_GROUP" -z "$ZONE" \
+            --query "[].{type:type, name:name}" -o tsv |
+          while IFS=$'\t' read -r fqtype rsname; do
+            rtype="${fqtype##*/}"                 # Microsoft.Network/dnszones/CNAME -> CNAME
+            rtype_uc=$(echo "$rtype" | tr '[:lower:]' '[:upper:]')
+            # Never touch the zone's Azure-managed apex SOA / NS records.
+            if [ "$rtype_uc" = "SOA" ]; then continue; fi
+            if [ "$rtype_uc" = "NS" ] && [ "$rsname" = "@" ]; then continue; fi
+            if grep -qxF "$rtype_uc $rsname" <<< "$desired"; then continue; fi
+            echo "Pruning $rtype_uc record '$rsname' (not in records.json)"
+            az network dns record-set "$(echo "$rtype_uc" | tr '[:upper:]' '[:lower:]')" delete \
+              -g "$RESOURCE_GROUP" -z "$ZONE" -n "$rsname" --yes --only-show-errors
+          done
+          echo "Reconcile complete."

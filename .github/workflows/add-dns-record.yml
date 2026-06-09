@@ -1,0 +1,100 @@
+name: Add DNS Record
+
+# One-click: add (or update) a record in the kscloud.io zone. This edits
+# dns/records.json and pushes to main — which triggers the Deploy DNS Zone
+# workflow to apply it. Upsert semantics: if a record with the same type+name
+# already exists, its value is replaced.
+#
+# records.json is the single source of truth; never edit the zone by hand.
+
+on:
+  workflow_dispatch:
+    inputs:
+      type:
+        description: 'Record type'
+        required: true
+        type: choice
+        default: CNAME
+        options:
+          - A
+          - CNAME
+          - TXT
+          - MX
+      name:
+        description: "Record name relative to the zone (use '@' for the apex)"
+        required: true
+        type: string
+      value:
+        description: "Value — A: IPv4 · CNAME: target host · TXT: text · MX: '<preference> <exchange>' e.g. '0 mail.example.com'"
+        required: true
+        type: string
+      ttl:
+        description: 'TTL in seconds'
+        required: false
+        type: string
+        default: '3600'
+
+permissions:
+  contents: write
+
+jobs:
+  add:
+    name: Add record to records.json
+    runs-on: ubuntu-latest
+    steps:
+      # Check out with the automation PAT so the push triggers Deploy DNS Zone.
+      # (Pushes made with the default GITHUB_TOKEN do NOT trigger other workflows.)
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
+
+      - name: Upsert record in dns/records.json
+        shell: bash
+        env:
+          TYPE: ${{ inputs.type }}
+          NAME: ${{ inputs.name }}
+          VALUE: ${{ inputs.value }}
+          TTL: ${{ inputs.ttl }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$TTL" =~ ^[0-9]+$ ]] || [ "$TTL" -lt 1 ]; then
+            echo "::error::TTL must be a positive integer (got '$TTL')"; exit 1
+          fi
+          # MX values must be "<preference> <exchange>" so the Bicep can split them.
+          if [ "$TYPE" = "MX" ] && ! [[ "$VALUE" =~ ^[0-9]+[[:space:]].+$ ]]; then
+            echo "::error::MX value must be '<preference> <exchange>', e.g. '0 mail.example.com'"; exit 1
+          fi
+
+          ENTRY=$(jq -n --arg t "$TYPE" --arg n "$NAME" --argjson ttl "$TTL" --arg v "$VALUE" \
+            '{type:$t, name:$n, ttl:$ttl, values:[$v]}')
+
+          # Upsert: drop any existing record with the same type+name, then append.
+          jq --argjson e "$ENTRY" --arg t "$TYPE" --arg n "$NAME" '
+            .records = ([ .records[] | select((.type == $t and .name == $n) | not) ] + [$e])
+          ' dns/records.json > dns/records.tmp
+          mv dns/records.tmp dns/records.json
+
+          echo "Resulting records.json:"; cat dns/records.json
+
+      - name: Commit and push (triggers Deploy DNS Zone)
+        shell: bash
+        env:
+          TYPE: ${{ inputs.type }}
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dns/records.json
+          if git diff --cached --quiet; then
+            echo "::notice::records.json unchanged — '$TYPE $NAME' already present with this value."
+            exit 0
+          fi
+          git commit -m "DNS: add $TYPE record '$NAME' to kscloud.io"
+          git push
+          {
+            echo "### Added DNS record \`$TYPE $NAME\`"
+            echo "Watch the **Deploy DNS Zone** workflow for the apply."
+          } >> "$GITHUB_STEP_SUMMARY"

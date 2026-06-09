@@ -1,0 +1,12 @@
+{
+  "$schema": "./records.schema.json",
+  "zoneName": "kscloud.io",
+  "records": [
+    { "type": "CNAME", "name": "autodiscover",           "ttl": 3600, "values": ["autodiscover.outlook.com"] },
+    { "type": "CNAME", "name": "enterpriseenrollment",   "ttl": 3600, "values": ["enterpriseenrollment-s.manage.microsoft.com"] },
+    { "type": "CNAME", "name": "enterpriseregistration", "ttl": 3600, "values": ["enterpriseregistration.windows.net"] },
+    { "type": "CNAME", "name": "fodbold",                "ttl": 3600, "values": ["calm-stone-04ffa2303.1.azurestaticapps.net"] },
+    { "type": "MX",    "name": "@",                      "ttl": 3600, "values": ["0 kscloud-io.mail.protection.outlook.com"] },
+    { "type": "TXT",   "name": "@",                      "ttl": 3600, "values": ["v=spf1 include:spf.protection.outlook.com -all"] }
+  ]
+}

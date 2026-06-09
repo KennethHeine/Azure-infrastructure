@@ -1,122 +1,89 @@
-// DNS Zone: kscloud.io
-// Manages the public DNS zone and all records in the 'rg-dns' resource group
-// (created by the Deploy DNS Zone workflow).
-// NS and SOA records are auto-managed by Azure and excluded from this template.
+// DNS Zone: kscloud.io (data-driven)
+//
+// The zone's records are declared in dns/records.json (the single source of
+// truth) and projected into Azure DNS record sets by the loops below. Add or
+// remove records with the Add DNS Record / Remove DNS Record workflows — they
+// edit records.json and push, which triggers the Deploy DNS Zone workflow.
+//
+// NOTE: ARM incremental deployments never delete records dropped from the
+// template, so the Deploy DNS Zone workflow runs a reconcile/prune step after
+// this deployment to delete any record set in the zone that is no longer in
+// records.json. NS and SOA at the apex are Azure-managed and excluded here.
 
 targetScope = 'resourceGroup'
 
-@description('DNS zone name')
-param zoneName string = 'kscloud.io'
+// ─── Records: single source of truth ─────────────────────────────────
+var config = loadJsonContent('records.json')
+var zoneName = config.zoneName
+var records = config.records
 
-// ─── DNS Zone ────────────────────────────────────────────────────────
+// Partition by type — each Azure DNS record-set type is its own resource type.
+var aRecords = filter(records, r => r.type == 'A')
+var cnameRecords = filter(records, r => r.type == 'CNAME')
+var txtRecords = filter(records, r => r.type == 'TXT')
+var mxRecords = filter(records, r => r.type == 'MX')
+
+// ─── DNS Zone ─────────────────────────────────────────────────────────
 resource dnsZone 'Microsoft.Network/dnsZones@2018-05-01' = {
   name: zoneName
   location: 'global'
 }
 
-// ─── MX Record: @ ───────────────────────────────────────────────────
-resource mxRoot 'Microsoft.Network/dnsZones/MX@2018-05-01' = {
-  parent: dnsZone
-  name: '@'
-  properties: {
-    TTL: 3600
-    MXRecords: [
-      {
-        preference: 0
-        exchange: 'kscloud-io.mail.protection.outlook.com'
+// ─── A records ──────────────────────────────────────────────────────
+resource aSets 'Microsoft.Network/dnsZones/A@2018-05-01' = [
+  for r in aRecords: {
+    parent: dnsZone
+    name: r.name
+    properties: {
+      TTL: r.ttl
+      ARecords: [for v in r.values: { ipv4Address: v }]
+    }
+  }
+]
+
+// ─── CNAME records (a CNAME set holds exactly one target) ─────────────
+resource cnameSets 'Microsoft.Network/dnsZones/CNAME@2018-05-01' = [
+  for r in cnameRecords: {
+    parent: dnsZone
+    name: r.name
+    properties: {
+      TTL: r.ttl
+      CNAMERecord: {
+        cname: r.values[0]
       }
-    ]
-  }
-}
-
-// ─── TXT Record: @ ──────────────────────────────────────────────────
-resource txtRoot 'Microsoft.Network/dnsZones/TXT@2018-05-01' = {
-  parent: dnsZone
-  name: '@'
-  properties: {
-    TTL: 3600
-    TXTRecords: [
-      {
-        value: [
-          'v=spf1 include:spf.protection.outlook.com -all'
-        ]
-      }
-    ]
-  }
-}
-
-// ─── CNAME: autodiscover ────────────────────────────────────────────
-resource cnameAutodiscover 'Microsoft.Network/dnsZones/CNAME@2018-05-01' = {
-  parent: dnsZone
-  name: 'autodiscover'
-  properties: {
-    TTL: 3600
-    CNAMERecord: {
-      cname: 'autodiscover.outlook.com'
     }
   }
-}
+]
 
-// ─── CNAME: chat ────────────────────────────────────────────────────
-resource cnameChat 'Microsoft.Network/dnsZones/CNAME@2018-05-01' = {
-  parent: dnsZone
-  name: 'chat'
-  properties: {
-    TTL: 3600
-    CNAMERecord: {
-      cname: 'blue-desert-0e5a3aa03.4.azurestaticapps.net'
+// ─── TXT records ──────────────────────────────────────────────────────
+resource txtSets 'Microsoft.Network/dnsZones/TXT@2018-05-01' = [
+  for r in txtRecords: {
+    parent: dnsZone
+    name: r.name
+    properties: {
+      TTL: r.ttl
+      TXTRecords: [for v in r.values: { value: [v] }]
     }
   }
-}
+]
 
-// ─── CNAME: enterpriseenrollment ────────────────────────────────────
-resource cnameEnterpriseEnrollment 'Microsoft.Network/dnsZones/CNAME@2018-05-01' = {
-  parent: dnsZone
-  name: 'enterpriseenrollment'
-  properties: {
-    TTL: 3600
-    CNAMERecord: {
-      cname: 'enterpriseenrollment-s.manage.microsoft.com'
+// ─── MX records (each value is "<preference> <exchange>") ─────────────
+resource mxSets 'Microsoft.Network/dnsZones/MX@2018-05-01' = [
+  for r in mxRecords: {
+    parent: dnsZone
+    name: r.name
+    properties: {
+      TTL: r.ttl
+      MXRecords: [
+        for v in r.values: {
+          preference: int(split(v, ' ')[0])
+          exchange: split(v, ' ')[1]
+        }
+      ]
     }
   }
-}
+]
 
-// ─── CNAME: enterpriseregistration ──────────────────────────────────
-resource cnameEnterpriseRegistration 'Microsoft.Network/dnsZones/CNAME@2018-05-01' = {
-  parent: dnsZone
-  name: 'enterpriseregistration'
-  properties: {
-    TTL: 3600
-    CNAMERecord: {
-      cname: 'enterpriseregistration.windows.net'
-    }
-  }
-}
-
-// ─── CNAME: fodbold ─────────────────────────────────────────────────
-resource cnameFodbold 'Microsoft.Network/dnsZones/CNAME@2018-05-01' = {
-  parent: dnsZone
-  name: 'fodbold'
-  properties: {
-    TTL: 3600
-    CNAMERecord: {
-      cname: 'calm-stone-04ffa2303.1.azurestaticapps.net'
-    }
-  }
-}
-
-// ─── CNAME: test-chat ────────────────────────────────────────────────
-resource cnameTestChat 'Microsoft.Network/dnsZones/CNAME@2018-05-01' = {
-  parent: dnsZone
-  name: 'test-chat'
-  properties: {
-    TTL: 3600
-    CNAMERecord: {
-      cname: 'ambitious-field-027ee2303.4.azurestaticapps.net'
-    }
-  }
-}
-
-// ─── Outputs ─────────────────────────────────────────────────────────
+// ─── Outputs ──────────────────────────────────────────────────────────
 output nameServers array = dnsZone.properties.nameServers
 output zoneId string = dnsZone.id
