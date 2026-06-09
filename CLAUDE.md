@@ -189,6 +189,31 @@ because ARM incremental deploys never delete, a prune step removes any record se
 in the zone not present in `records.json` (apex `NS`/`SOA` are always preserved).
 MX values are `'<preference> <exchange>'` (e.g. `0 mail.example.com`).
 
+### Manage Exchange Online (mail tenant)
+Exchange Online has **no ARM/Bicep surface**, so it's managed the same way the DNS
+zone is — declaratively, from code. `exchange/config.json` is the **single source of
+truth** (currently: DKIM signing state per domain); `scripts/deploy-exchange.ps1`
+reconciles it into Exchange Online idempotently via the **Deploy Exchange Online
+Config** workflow (push to `exchange/**`, or manual).
+
+**Auth is credential-free — no certificate, no stored secret.** Exchange Online
+PowerShell can't consume a GitHub OIDC token directly, but `Connect-ExchangeOnline`
+accepts `-AccessToken`. So the workflow signs in the **same OIDC SP** used everywhere
+else (`azure/login`), mints an Exchange token off it
+(`az account get-access-token --resource https://outlook.office365.com`), and connects
+app-only. The SP carries the Exchange RBAC it needs via two grants added by
+`setup-service-principal.ps1`: the **`Exchange.ManageAsApp`** app role (on *Office 365
+Exchange Online*) and the **Exchange Administrator** directory role (which populates
+the RBAC claim EXO reads from the token). A managed identity would be just another
+SP with the same roles — `-AccessToken` lets the existing federated SP do the job
+without IMDS or a cert.
+
+Reconciliation is **additive** (unlike the DNS pruner): only domains listed in
+`config.json` are touched; an unlisted domain is never disabled. A domain whose
+selector CNAMEs haven't propagated yet can't be enabled (EXO reports `CnameMissing`)
+— that's reported as **pending**, not a failure, and self-heals on the next run. DKIM
+needs both halves: the selector CNAMEs in `dns/records.json` **and** the enable here.
+
 ## The automation token
 
 `AUTOMATION_GITHUB_TOKEN` (repo secret) is a classic PAT with `repo` (+ `workflow`,
@@ -207,6 +232,7 @@ URL, validates, writes the secret, optionally re-runs onboarding).
 | `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone (creates `rg-dns`); applies `dns/records.json` then prunes stale records |
 | `add-dns-record.yml` | manual (inputs) | Upsert a record in `dns/records.json` → triggers Deploy DNS Zone |
 | `remove-dns-record.yml` | manual (inputs) | Remove a record from `dns/records.json` → triggers Deploy DNS Zone |
+| `exchange-deploy.yml` | push to `exchange/**`, manual | Reconcile Exchange Online config (DKIM signing) from `exchange/config.json`, app-only via the OIDC SP |
 
 ## Required secrets (on this repo)
 
@@ -214,9 +240,11 @@ URL, validates, writes the secret, optionally re-runs onboarding).
 onboarding SP `sp-azure-infrastructure-github`), and `AUTOMATION_GITHUB_TOKEN`.
 
 The onboarding SP (configured by `setup-service-principal.ps1`) has: **Owner** on
-the subscription, and Microsoft Graph **`Application.ReadWrite.All`** (create repo
+the subscription, Microsoft Graph **`Application.ReadWrite.All`** (create repo
 SPs) + **`AppRoleAssignment.ReadWrite.All`** (delegate `Application.ReadWrite.OwnedBy`
-to repo SPs for Easy Auth). Re-run that script if these need to be (re)granted.
+to repo SPs for Easy Auth), and for managing the mail tenant as code: **Office 365
+Exchange Online `Exchange.ManageAsApp`** + the **Exchange Administrator** directory
+role. Re-run that script if these need to be (re)granted.
 
 ## Conventions for agents
 

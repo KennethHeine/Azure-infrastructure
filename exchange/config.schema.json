@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Exchange Online configuration",
+  "description": "Source of truth for the tenant's Exchange Online settings managed as code. Applied idempotently by scripts/deploy-exchange.ps1 via the Deploy Exchange Online Config workflow. Only the settings declared here are reconciled; anything not listed is left untouched (unlike the DNS pruner, this is additive — it never disables an unlisted domain).",
+  "type": "object",
+  "required": ["organization", "dkim"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "organization": {
+      "type": "string",
+      "description": "The tenant's primary .onmicrosoft.com domain, passed to Connect-ExchangeOnline -Organization."
+    },
+    "dkim": {
+      "type": "array",
+      "description": "Desired DKIM signing state per accepted domain. A config is created if missing (disabled), then its Enabled flag is reconciled to match. Enabling requires the selector CNAMEs to already resolve (see dns/records.json); until then the domain stays pending and is retried on the next run.",
+      "items": {
+        "type": "object",
+        "required": ["domain", "enabled"],
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "Accepted domain to sign, e.g. kscloud.io"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether DKIM signing should be enabled for the domain"
+          }
+        }
+      }
+    }
+  }
+}

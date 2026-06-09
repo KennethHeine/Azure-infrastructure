@@ -1,0 +1,42 @@
+name: Deploy Exchange Online Config
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches: [main]
+    paths: ['exchange/**', 'scripts/deploy-exchange.ps1']
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Reconcile Exchange Online config
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # Signs in the SAME OIDC service principal used everywhere else in this repo.
+      # No certificate, no stored secret — the next step mints an Exchange Online
+      # token off this login, and the SP carries Exchange.ManageAsApp + the Exchange
+      # Administrator directory role (granted by scripts/setup-service-principal.ps1).
+      - name: Azure Login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Exchange Online PowerShell module
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module ExchangeOnlineManagement -RequiredVersion 3.10.0 -Scope CurrentUser -Force -AllowClobber
+
+      - name: Reconcile Exchange Online config
+        shell: pwsh
+        run: ./scripts/deploy-exchange.ps1 -ConfigFile ./exchange/config.json
