@@ -89,19 +89,20 @@ try {
         }
 
         if ($want) {
-            # Enabling: only possible once the selector CNAMEs resolve.
-            if ($cfg.Status -eq "CnameMissing") {
-                Write-Host "[$domain] PENDING — selector CNAMEs not yet resolvable; will enable on a later run." -ForegroundColor Yellow
-                $pending += $domain
-                continue
-            }
+            # Always *attempt* the enable rather than trusting $cfg.Status: the
+            # Status field (e.g. CnameMissing) is cached from Exchange's last
+            # periodic check and lags public DNS, whereas Set-DkimSigningConfig
+            # forces a fresh live lookup — so this can succeed even when the cached
+            # status still reads CnameMissing. A genuine "CNAMEs not visible to
+            # Exchange yet" failure is caught below and reported as pending.
             try {
                 Set-DkimSigningConfig -Identity $domain -Enabled $true -ErrorAction Stop
                 Write-Host "[$domain] DKIM ENABLED" -ForegroundColor Green
                 $changed += "$domain (enabled)"
             } catch {
-                # Most commonly the CNAMEs are not visible yet — treat as pending.
-                Write-Host "[$domain] could not enable yet: $($_.Exception.Message)" -ForegroundColor Yellow
+                # Most commonly Exchange can't resolve the selector CNAMEs yet
+                # (its validators lag public DNS) — treat as pending, self-heals.
+                Write-Host "[$domain] PENDING — Exchange can't resolve the selector CNAMEs yet: $($_.Exception.Message)" -ForegroundColor Yellow
                 $pending += $domain
             }
         } else {
