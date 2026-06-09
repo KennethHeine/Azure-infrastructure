@@ -155,6 +155,29 @@ foreach ($perm in $graphPermissions.GetEnumerator()) {
     }
 }
 
+# ─── Exchange Online app permission (manage EXO config as code) ───────
+# The Office 365 Exchange Online resource (well-known appId) exposes the
+# Exchange.ManageAsApp application role. With it (plus the Exchange Administrator
+# directory role assigned in Step 4b), this SP can connect to Exchange Online
+# PowerShell app-only via an access token minted from its OIDC login — no
+# certificate or stored secret required. See scripts/deploy-exchange.ps1.
+$exoResourceAppId   = "00000002-0000-0ff1-ce00-000000000000"  # Office 365 Exchange Online
+$exoManageAsAppRole = "dc50a0fb-09a3-484d-be87-e023b12c6440"  # Exchange.ManageAsApp (app role)
+
+$hasExoPermission = $existingPermissions | Where-Object { $_.resourceAppId -eq $exoResourceAppId } |
+    ForEach-Object { $_.resourceAccess } |
+    Where-Object { $_.id -eq $exoManageAsAppRole -and $_.type -eq "Role" }
+
+if ($hasExoPermission) {
+    Write-Host "  Exchange.ManageAsApp already configured" -ForegroundColor Yellow
+} else {
+    az ad app permission add `
+        --id $appId `
+        --api $exoResourceAppId `
+        --api-permissions "$exoManageAsAppRole=Role" --only-show-errors 2>&1 | Out-Null
+    Write-Host "  Added Exchange.ManageAsApp to app registration" -ForegroundColor Green
+}
+
 # Grant admin consent for all configured permissions (idempotent — safe to re-run).
 Write-Host "  Granting admin consent (requires Global Admin or Privileged Role Admin)..." -ForegroundColor Gray
 az ad app permission admin-consent --id $appId --only-show-errors 2>&1
@@ -164,6 +187,55 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "  WARNING: Admin consent failed. Ask a Global Admin to grant consent for the" -ForegroundColor Red
     Write-Host "  Graph permissions above on app '$ServicePrincipalName' ($appId)." -ForegroundColor Red
     Write-Host "  Without them, the infra repo cannot onboard repos or enable Entra auth." -ForegroundColor Red
+}
+
+# ─── Step 4b: Assign the Exchange Administrator directory role to the SP ──
+# For app-only Exchange Online connections, the RBAC the session gets is derived
+# from the directory role baked into the access token. Exchange Administrator lets
+# the SP run the DKIM/org cmdlets in scripts/deploy-exchange.ps1. (Can be tightened
+# later to a custom Exchange role group via New-ServicePrincipal/Add-RoleGroupMember
+# if a narrower scope than the full Exchange Administrator role is wanted.)
+Write-Host "Step 4b: Assigning Exchange Administrator directory role to the SP..." -ForegroundColor Cyan
+$exchangeAdminRoleTemplateId = "29232cdf-9323-42fd-ade2-1d097af3e4de"
+
+# Directory roles must be activated from their template before members can be added.
+$roleListJson = az rest --method get `
+    --url "https://graph.microsoft.com/v1.0/directoryRoles?`$filter=roleTemplateId eq '$exchangeAdminRoleTemplateId'" `
+    --only-show-errors
+$roleId = ($roleListJson | ConvertFrom-Json).value[0].id
+
+if (-not $roleId) {
+    Write-Host "  Activating Exchange Administrator directory role..." -ForegroundColor Gray
+    $activateBody = Join-Path $env:TEMP "exo-role-activate.json"
+    "{`"roleTemplateId`": `"$exchangeAdminRoleTemplateId`"}" | Out-File -FilePath $activateBody -Encoding utf8
+    $roleId = (az rest --method post `
+        --url "https://graph.microsoft.com/v1.0/directoryRoles" `
+        --headers "Content-Type=application/json" `
+        --body "@$activateBody" --only-show-errors | ConvertFrom-Json).id
+    Remove-Item $activateBody -ErrorAction SilentlyContinue
+}
+
+# Idempotent membership check, then add the SP as a member of the role.
+$membersJson = az rest --method get `
+    --url "https://graph.microsoft.com/v1.0/directoryRoles/$roleId/members?`$select=id" `
+    --only-show-errors
+$isMember = ($membersJson | ConvertFrom-Json).value | Where-Object { $_.id -eq $spObjectId }
+
+if ($isMember) {
+    Write-Host "  SP already has the Exchange Administrator role" -ForegroundColor Yellow
+} else {
+    $refBody = Join-Path $env:TEMP "exo-role-member.json"
+    "{`"@odata.id`": `"https://graph.microsoft.com/v1.0/directoryObjects/$spObjectId`"}" | Out-File -FilePath $refBody -Encoding utf8
+    az rest --method post `
+        --url "https://graph.microsoft.com/v1.0/directoryRoles/$roleId/members/`$ref" `
+        --headers "Content-Type=application/json" `
+        --body "@$refBody" --only-show-errors 2>&1 | Out-Null
+    Remove-Item $refBody -ErrorAction SilentlyContinue
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Assigned Exchange Administrator role to the SP" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: Could not assign Exchange Administrator role — assign it manually" -ForegroundColor Yellow
+    }
 }
 
 # ─── Step 5: Create federated credentials for THIS repo ─────────────
@@ -240,6 +312,8 @@ Write-Host "Infrastructure SP Permissions:" -ForegroundColor Green
 Write-Host "  - Owner role on subscription $subscriptionId"
 Write-Host "  - Microsoft Graph: Application.ReadWrite.All (create SPs for other repos)"
 Write-Host "  - Microsoft Graph: AppRoleAssignment.ReadWrite.All (grant repo SPs Application.ReadWrite.OwnedBy for Easy Auth)"
+Write-Host "  - Office 365 Exchange Online: Exchange.ManageAsApp (manage Exchange Online config as code)"
+Write-Host "  - Directory role: Exchange Administrator (RBAC for app-only EXO connections)"
 Write-Host ""
 Write-Host "Add these secrets to the '$GitHubRepo' GitHub repository:" -ForegroundColor Yellow
 Write-Host "  Settings > Secrets and variables > Actions > New repository secret"

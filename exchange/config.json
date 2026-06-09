@@ -1,0 +1,7 @@
+{
+  "$schema": "./config.schema.json",
+  "organization": "KSCloudSolutionsApS.onmicrosoft.com",
+  "dkim": [
+    { "domain": "kscloud.io", "enabled": true }
+  ]
+}
