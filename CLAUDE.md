@@ -253,6 +253,23 @@ selector CNAMEs haven't propagated yet can't be enabled (EXO reports `CnameMissi
 — that's reported as **pending**, not a failure, and self-heals on the next run. DKIM
 needs both halves: the selector CNAMEs in `dns/records.platform.json` **and** the enable here.
 
+## GitHub App for the claude-runner agent (as code)
+
+The `claude-runner` agent sessions authenticate to GitHub with a **GitHub App**
+(short-lived installation tokens; safer than a personal account). GitHub does
+not allow creating apps via plain REST/Bicep, so this repo codifies the maximum
+GitHub supports — the **app manifest flow**:
+
+| File | Holds |
+|------|-------|
+| `github-app/manifest.json` | The app definition: name `claude-runner-agent`, no webhook, repository permissions Contents/Actions/Workflows/PRs/Issues **RW** + Metadata R |
+| `scripts/create-github-app.ps1` | Drives the manifest flow end-to-end: browser confirm (once) → exchanges the code for app id + private key → uploads the PEM **directly into the claude-runner Key Vault** (`github-app-private-key`) → prints the install link and the `githubAppId` value to set in `claude-runner/infra/main.parameters.json` |
+
+Run it from a machine with a browser + `az login`. Key rotation does **not**
+need the script: generate a new key on the app's GitHub page and
+`az keyvault secret set` it. To change permissions later, edit them on the app
+page (and mirror the change in `manifest.json` so the file stays the truth).
+
 ## The automation token
 
 `AUTOMATION_GITHUB_TOKEN` (repo secret) is a classic PAT with `repo` (+ `workflow`,
