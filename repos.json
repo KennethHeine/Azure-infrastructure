@@ -13,6 +13,10 @@
       "name": "claude-runner",
       "template": "container-app",
       "auth": true
+    },
+    {
+      "name": "kennethheine.com",
+      "template": "static-web"
     }
   ]
 }
