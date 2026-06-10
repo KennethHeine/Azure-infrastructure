@@ -66,6 +66,23 @@ repo is processed — so a repo's first Bicep deploy never trips over an
 unregistered provider. Add a namespace to `providers.json` whenever a template
 starts using a new Azure resource type. Schema: `providers.schema.json`.
 
+## Config: `role-grants.json`
+
+Estate-wide **RBAC grants that exceed a single repo's resource-group scope**.
+Repo-scoped RBAC belongs in each repo's own Bicep (its SP is Owner of its RG);
+a subscription-scope assignment can't be created by a repo SP, so it is
+declared here and applied by the onboarding SP (subscription Owner) via
+`scripts/apply-role-grants.ps1` — `process-repos.ps1` runs it right after
+provider registration. Idempotent; an identity whose repo hasn't deployed yet
+is a warning, not a failure (re-run **Onboard Repositories** after that repo's
+infra deploy). Schema: `role-grants.schema.json`.
+
+Current grants: the `claude-runner` **coder-session identity**
+(`id-claude-runner-session-coder`) gets subscription **Reader** + **Log
+Analytics Reader** — read-only estate visibility (resource state + runtime
+logs) for the autonomous coding agent, which still cannot change Azure outside
+GitHub Actions.
+
 ## Templates (GitHub template repositories)
 
 | Template | Repo | What you get |

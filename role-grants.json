@@ -1,0 +1,12 @@
+{
+  "$schema": "./role-grants.schema.json",
+  "grants": [
+    {
+      "comment": "claude-runner coder sessions: read-only estate visibility (resource state + runtime logs) — the agent debugs deployed apps but cannot change Azure outside GitHub Actions.",
+      "identityName": "id-claude-runner-session-coder",
+      "identityResourceGroup": "rg-claude-runner",
+      "scope": "subscription",
+      "roles": ["Reader", "Log Analytics Reader"]
+    }
+  ]
+}

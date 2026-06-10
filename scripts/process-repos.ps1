@@ -72,6 +72,20 @@ if (Test-Path $registerProviders) {
     Write-Host ""
 }
 
+# ─── Ensure estate-wide RBAC grants (role-grants.json) ───────────────
+# Cross-RG/subscription-scope grants that a repo's own SP cannot create —
+# applied here by the onboarding SP. Idempotent; identities whose repos
+# haven't deployed yet are skipped with a warning.
+$applyRoleGrants = Join-Path $scriptDir "apply-role-grants.ps1"
+if (Test-Path $applyRoleGrants) {
+    & $applyRoleGrants
+    if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+        Write-Host "Error: Role grant application failed." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ""
+}
+
 if (-not (Test-Path $onboardScript)) {
     Write-Host "Error: Onboarding script not found: $onboardScript" -ForegroundColor Red
     exit 1

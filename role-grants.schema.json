@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Estate-wide RBAC grants",
+  "description": "Role assignments that exceed a single repo's resource-group scope (e.g. subscription-scope read access for a user-assigned managed identity). Applied idempotently by scripts/apply-role-grants.ps1 during onboarding — repo-scoped RBAC belongs in each repo's own Bicep instead.",
+  "type": "object",
+  "required": ["grants"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "grants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["identityName", "identityResourceGroup", "scope", "roles"],
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "type": "string",
+            "description": "Why this grant exists — required reading for whoever reviews changes here."
+          },
+          "identityName": {
+            "type": "string",
+            "description": "Name of the user-assigned managed identity receiving the roles."
+          },
+          "identityResourceGroup": {
+            "type": "string",
+            "description": "Resource group containing the identity."
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["subscription"],
+            "description": "Assignment scope. Only subscription is supported — anything narrower belongs in the owning repo's Bicep."
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" },
+            "description": "Built-in role names to assign (e.g. Reader, Log Analytics Reader)."
+          }
+        }
+      }
+    }
+  }
+}
