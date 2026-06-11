@@ -2,14 +2,6 @@
   "$schema": "./records.schema.json",
   "records": [
     {
-      "type": "CNAME",
-      "name": "claude",
-      "ttl": 3600,
-      "values": [
-        "ca-claude-runner.ambitioussmoke-ff5f1723.norwayeast.azurecontainerapps.io"
-      ]
-    },
-    {
       "type": "TXT",
       "name": "asuid.claude",
       "ttl": 3600,
@@ -23,6 +15,14 @@
       "ttl": 300,
       "values": [
         "ashy-smoke-009d28303.7.azurestaticapps.net"
+      ]
+    },
+    {
+      "type": "CNAME",
+      "name": "claude",
+      "ttl": 3600,
+      "values": [
+        "ca-claude-runner.livelysky-81efa65b.swedencentral.azurecontainerapps.io"
       ]
     }
   ]
