@@ -3,7 +3,10 @@
   "gitHubOrg": "KennethHeine",
   "location": "swedencentral",
   "repos": [
-    "football-tournament",
+    {
+      "name": "football-tournament",
+      "template": "static-web"
+    },
     {
       "name": "article-to-speech",
       "template": "container-app",
