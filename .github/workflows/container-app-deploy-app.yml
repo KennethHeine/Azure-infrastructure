@@ -112,8 +112,13 @@ jobs:
         run: |
           set -euo pipefail
           REPO='${{ github.event.repository.name }}'
+          # Expose this repo's ACR login server so a Dockerfile can pull base
+          # images through an ACR pull-through cache (avoids Docker Hub's
+          # anonymous pull-rate limit). Dockerfiles that don't declare the
+          # ARG simply ignore it (BuildKit warns, build still succeeds).
           az acr build \
             --registry '${{ needs.setup.outputs.acrName }}' \
+            --build-arg ACR_LOGIN_SERVER='${{ needs.setup.outputs.acrLoginServer }}' \
             --image "${REPO}:${{ github.sha }}" \
             --image "${REPO}:latest" \
             --file Dockerfile .
@@ -144,8 +149,11 @@ jobs:
           set -euo pipefail
           REPO='${{ github.event.repository.name }}'
           SUFFIX='${{ matrix.image.suffix }}'
+          # See build-app: ACR_LOGIN_SERVER lets a Dockerfile cache base images
+          # through this repo's ACR; ignored by Dockerfiles that don't use it.
           az acr build \
             --registry '${{ needs.setup.outputs.acrName }}' \
+            --build-arg ACR_LOGIN_SERVER='${{ needs.setup.outputs.acrLoginServer }}' \
             --image "${REPO}${SUFFIX}:${{ github.sha }}" \
             --image "${REPO}${SUFFIX}:latest" \
             --file '${{ matrix.image.dockerfile }}' \
