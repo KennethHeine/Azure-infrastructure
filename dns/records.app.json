@@ -20,9 +20,9 @@
     {
       "type": "CNAME",
       "name": "fodbold",
-      "ttl": 3600,
+      "ttl": 300,
       "values": [
-        "orange-plant-0476f9203.7.azurestaticapps.net"
+        "calm-stone-04ffa2303.1.azurestaticapps.net"
       ]
     }
   ]
