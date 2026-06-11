@@ -43,6 +43,8 @@ jobs:
       - name: Deploy Bicep
         id: deploy
         uses: azure/cli@v2
+        env:
+          ENABLE_AUTH_VAR: ${{ vars.ENABLE_AUTH }}
         with:
           inlineScript: |
             set -euo pipefail
@@ -97,6 +99,23 @@ jobs:
               BIND_ARGS=(bindCustomDomain=true)
             fi
 
+            # Easy Auth: onboarding records the repo's auth choice in the
+            # ENABLE_AUTH repo VARIABLE, but Bicep reads enableAuth from
+            # parameters.json (which ships as true from the template) — so a
+            # repo onboarded with auth=false silently deployed WITH auth unless
+            # someone also edited parameters.json. Honor the variable here as an
+            # explicit override; strictly validated, and repos without the
+            # variable keep parameters.json behavior unchanged.
+            AUTH_ARGS=()
+            case "${ENABLE_AUTH_VAR:-}" in
+              true|false)
+                echo "Overriding enableAuth=$ENABLE_AUTH_VAR (from the ENABLE_AUTH repo variable)."
+                AUTH_ARGS=(enableAuth="$ENABLE_AUTH_VAR")
+                ;;
+              '') : ;;  # variable unset — parameters.json decides
+              *) echo "::warning::Ignoring non-boolean ENABLE_AUTH variable: '$ENABLE_AUTH_VAR'" ;;
+            esac
+
             az deployment group create \
               --resource-group "$RESOURCE_GROUP" \
               --name "$DEPLOYMENT_NAME" \
@@ -105,6 +124,7 @@ jobs:
                 appName="$APP_NAME" \
                 "${IMAGE_ARGS[@]}" \
                 "${BIND_ARGS[@]}" \
+                "${AUTH_ARGS[@]}" \
               --only-show-errors
 
             get_output() {

@@ -92,9 +92,92 @@ jobs:
           echo "acrName=$ACR_NAME" >> "$GITHUB_OUTPUT"
           echo "acrLoginServer=$ACR_LOGIN_SERVER" >> "$GITHUB_OUTPUT"
 
+  # Keep Docker Hub base images cached in the repo's own ACR. `az acr build`
+  # agents pull from Docker Hub anonymously via a shared egress IP, which
+  # intermittently 429s (toomanyrequests) and fails builds. Convention: a
+  # Dockerfile opts in by declaring `ARG ACR_LOGIN_SERVER=docker.io` and using
+  # `FROM ${ACR_LOGIN_SERVER}/<path>:<tag>` (local builds fall back to Docker
+  # Hub). This job scans the repo's Dockerfiles for those references and lazily
+  # imports each into the ACR — only when missing or older than a week, so
+  # Docker Hub is touched at most ~once a week per tag. Azure blocks anonymous
+  # Docker Hub *cache rules* (EnforceCacheRuleAuthentication), hence import.
+  # Repos with no such FROM lines: fast no-op.
+  prime-base-images:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Scan Dockerfiles for ACR-cached base images
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          refs=$(grep -rhoE '^FROM \$\{ACR_LOGIN_SERVER\}/[^ ]+' --include='Dockerfile*' --include='*.Dockerfile' . 2>/dev/null \
+            | sed 's|^FROM ${ACR_LOGIN_SERVER}/||' | sort -u || true)
+          echo "refs<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$refs" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          if [ -n "$refs" ]; then echo "Found base-image refs:"; echo "$refs"; else echo "No ACR-cached base images referenced — nothing to prime."; fi
+
+      - name: Azure Login
+        if: ${{ steps.scan.outputs.refs != '' }}
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Refresh stale base images (> 1 week) from Docker Hub
+        if: ${{ steps.scan.outputs.refs != '' }}
+        shell: bash
+        env:
+          ACR_NAME: ${{ needs.setup.outputs.acrName }}
+          REFS: ${{ steps.scan.outputs.refs }}
+        run: |
+          set -euo pipefail
+          MAX_AGE_DAYS=7
+          # Import with retries: anonymous Docker Hub pulls 429 under the shared
+          # egress IP. A throttled REFRESH of an already-cached image keeps the
+          # stale copy (non-fatal); missing + throttled is fatal (FROM would 404).
+          import_ref() {
+            local ref="$1" had_copy="$2" n=0
+            until az acr import -n "$ACR_NAME" --source "docker.io/${ref}" -t "$ref" --force; do
+              n=$((n + 1))
+              if [ "$n" -ge 6 ]; then
+                if [ "$had_copy" = 1 ]; then
+                  echo "::warning::Could not refresh ${ref} (Docker Hub throttling); keeping the cached copy."
+                  return 0
+                fi
+                echo "::error::${ref} is not cached and Docker Hub keeps throttling. Re-run shortly; once seeded it won't pull again for a week."
+                return 1
+              fi
+              echo "import attempt ${n} for ${ref} failed (likely 429); retrying in 60s…"
+              sleep 60
+            done
+            echo "Imported ${ref}."
+          }
+          while IFS= read -r ref; do
+            [ -z "$ref" ] && continue
+            updated=$(az acr repository show -n "$ACR_NAME" --image "$ref" --query lastUpdateTime -o tsv 2>/dev/null || true)
+            had_copy=0; stale=1
+            if [ -n "$updated" ]; then
+              had_copy=1
+              if epoch=$(date -u -d "${updated%.*}Z" +%s 2>/dev/null); then
+                age=$(( ( $(date -u +%s) - epoch ) / 86400 ))
+                echo "${ref} is ${age}d old in ${ACR_NAME}"
+                if [ "$age" -lt "$MAX_AGE_DAYS" ]; then stale=0; fi
+              fi
+            else
+              echo "${ref} not cached in ${ACR_NAME} yet"
+            fi
+            if [ "$stale" = 1 ]; then import_ref "$ref" "$had_copy"; else echo "Fresh enough — no Docker Hub hit for ${ref}."; fi
+          done <<< "$REFS"
+
   # Build + push the primary app image (cloud build in ACR).
   build-app:
-    needs: setup
+    needs: [setup, prime-base-images]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -126,7 +209,7 @@ jobs:
   # Build + push any extra images (e.g. a per-session runner image), one parallel
   # job per entry. Skipped entirely when the caller passes no extra_images.
   build-extra:
-    needs: setup
+    needs: [setup, prime-base-images]
     if: ${{ inputs.extra_images != '[]' }}
     runs-on: ubuntu-latest
     strategy:
