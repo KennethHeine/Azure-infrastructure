@@ -367,14 +367,18 @@ if (-not $ghToken) {
     }
     Write-Host ""
 
-    # ─── Step 7: Enable auto-delete head branches ────────────────────
-    Write-Host "Step 7: Enabling 'Automatically delete head branches'..." -ForegroundColor Cyan
+    # ─── Step 7: Repo merge settings ─────────────────────────────────
+    # delete_branch_on_merge keeps the repo free of stale Dependabot branches;
+    # allow_auto_merge lets the dependabot-auto-merge workflow use
+    # `gh pr merge --auto` (the GitHub App token cannot change repo settings,
+    # so this must happen here with the automation PAT).
+    Write-Host "Step 7: Enabling auto-delete head branches + auto-merge..." -ForegroundColor Cyan
 
-    gh api --method PATCH "repos/$repoFullName" -f delete_branch_on_merge=true --silent 2>&1 | Out-Null
+    gh api --method PATCH "repos/$repoFullName" -f delete_branch_on_merge=true -f allow_auto_merge=true --silent 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "  Auto-delete head branches enabled" -ForegroundColor Green
+        Write-Host "  Auto-delete head branches + auto-merge enabled" -ForegroundColor Green
     } else {
-        Write-Host "  WARNING: Failed to enable auto-delete head branches" -ForegroundColor Yellow
+        Write-Host "  WARNING: Failed to update repo merge settings" -ForegroundColor Yellow
     }
     Write-Host ""
 
