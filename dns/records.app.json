@@ -3,14 +3,6 @@
   "records": [
     {
       "type": "CNAME",
-      "name": "fodbold",
-      "ttl": 3600,
-      "values": [
-        "calm-stone-04ffa2303.1.azurestaticapps.net"
-      ]
-    },
-    {
-      "type": "CNAME",
       "name": "claude",
       "ttl": 3600,
       "values": [
@@ -23,6 +15,14 @@
       "ttl": 3600,
       "values": [
         "BF866F688DE63855C1E584D7CFEA69698949BBD2BF44A5F478CDA1198B1D5023"
+      ]
+    },
+    {
+      "type": "CNAME",
+      "name": "fodbold",
+      "ttl": 3600,
+      "values": [
+        "orange-plant-0476f9203.7.azurestaticapps.net"
       ]
     }
   ]
