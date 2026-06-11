@@ -17,11 +17,6 @@
     {
       "name": "kennethheine.com",
       "template": "static-web"
-    },
-    {
-      "name": "agent-test",
-      "template": "container-app",
-      "auth": false
     }
   ]
 }
