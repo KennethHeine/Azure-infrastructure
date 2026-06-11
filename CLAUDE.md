@@ -319,6 +319,51 @@ to repo SPs for Easy Auth), and for managing the mail tenant as code: **Office 3
 Exchange Online `Exchange.ManageAsApp`** + the **Exchange Administrator** directory
 role. Re-run that script if these need to be (re)granted.
 
+## Operational gotchas (learned the hard way — read before estate work)
+
+**DNS (kscloud.io):**
+- **Never dispatch two DNS-record workflows concurrently.** Both commit to this
+  repo's `main`; the loser's push is rejected and its record silently lost.
+  Worse, two overlapping **Deploy DNS Zone** runs check out different commits
+  and the older run's prune step deletes records the newer one just added.
+  Dispatch one record change, wait for its Deploy DNS Zone to finish, then the
+  next. Recovery: dispatch `dns-deploy.yml` once, alone, from current HEAD.
+- **Verify DNS against the authoritative azure-dns NS, not 8.8.8.8** — public
+  resolvers serve stale negative caches for up to the SOA min TTL after a
+  prune+recreate. `dig <name> TXT @ns1-05.azure-dns.com` shows truth, and it is
+  what Azure's managed-cert validation reads (so binding can succeed while
+  8.8.8.8 still shows nothing).
+- **Decommissioning a repo does NOT prune its DNS records.** Remove the app's
+  CNAME + `asuid.*` TXT entries from `dns/records.app.json` in the same cleanup
+  — in ONE atomic commit (see the concurrency hazard above).
+
+**Custom domains (container apps):**
+- When the app already exists, deploy-infra registers the hostname AND binds the
+  managed cert in the SAME run once `customDomain` is set — so the CNAME +
+  `asuid` TXT must be authoritative **before** you push the parameter. (The
+  "first pass deploys unbound" note only applies when the app doesn't exist yet.)
+
+**Regions:**
+- **Azure Static Web Apps exist in only 5 regions** (centralus, eastus2,
+  westus2, westeurope, eastasia) — none in the Nordics. The static-web template
+  maps unsupported regions to westeurope; content is edge-served, so no penalty.
+- **Resource groups never relocate.** Changing `location` in repos.json only
+  affects future RGs; an existing RG must be deleted + recreated (a one-off
+  `workflow_dispatch` in the repo running as its own SP can delete its RG, then
+  onboarding recreates it). Cognitive Services accounts **soft-delete** with the
+  RG and block same-name recreation — recover with `properties.restore: true`
+  for one deploy, then revert.
+
+**Easy Auth:**
+- `add-repo` `auth=` writes the **ENABLE_AUTH repo variable**, and the reusable
+  deploy-infra passes it as the `enableAuth` parameter override; without the
+  variable, `infra/main.parameters.json` (template default **true**) decides.
+- To call an Easy-Auth-protected app non-interactively: any same-tenant
+  identity can `az account get-access-token --resource <authAppClientId>` and
+  send it as a bearer — Easy Auth accepts it (aud/iss match the app
+  registration). Works for smoke tests, CI verification, and Playwright
+  (`extraHTTPHeaders`).
+
 ## Conventions for agents
 
 - **Bicep only**, deployed via GitHub Actions — never create Azure resources by
@@ -332,3 +377,8 @@ role. Re-run that script if these need to be (re)granted.
   `[Parser]::ParseFile(...)` and Bicep with `az bicep build`.
 - After changing onboarding logic, prefer validating against a throwaway repo via
   the Add/Decommission workflows rather than an existing one.
+- **Base images through ACR**: container-app Dockerfiles should declare
+  `ARG ACR_LOGIN_SERVER=docker.io` and `FROM ${ACR_LOGIN_SERVER}/<path>:<tag>`
+  — the reusable deploy-app workflow injects the repo ACR's login server and
+  lazily imports/refreshes the base image (Docker Hub anonymous pulls 429
+  under ACR's shared egress IP; anonymous cache *rules* are blocked by Azure).
