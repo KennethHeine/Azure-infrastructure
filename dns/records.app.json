@@ -24,6 +24,14 @@
       "values": [
         "ca-claude-runner.livelysky-81efa65b.swedencentral.azurecontainerapps.io"
       ]
+    },
+    {
+      "type": "CNAME",
+      "name": "kontoplan",
+      "ttl": 3600,
+      "values": [
+        "ca-kontoplan.lemonwater-af449ba6.swedencentral.azurecontainerapps.io"
+      ]
     }
   ]
 }
