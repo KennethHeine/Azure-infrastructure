@@ -30,6 +30,11 @@
       "name": "inference-lab",
       "template": "container-app",
       "auth": true
+    },
+    {
+      "name": "cvr-portal",
+      "template": "container-app",
+      "auth": true
     }
   ]
 }
