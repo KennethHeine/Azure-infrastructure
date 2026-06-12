@@ -296,6 +296,10 @@ jobs:
   # continue-on-error: a cleanup hiccup must not mark a successful deploy red.
   cleanup:
     needs: [setup, deploy]
+    # Explicit condition (like deploy's): with build-extra legitimately skipped,
+    # the implicit success() sees a skipped job in the transitive needs chain
+    # and would skip this job too.
+    if: ${{ always() && needs.deploy.result == 'success' }}
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
