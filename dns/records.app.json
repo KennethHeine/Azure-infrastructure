@@ -40,6 +40,14 @@
       "values": [
         "BF866F688DE63855C1E584D7CFEA69698949BBD2BF44A5F478CDA1198B1D5023"
       ]
+    },
+    {
+      "type": "CNAME",
+      "name": "inference",
+      "ttl": 3600,
+      "values": [
+        "ca-inference-lab.wittystone-8ca20c93.swedencentral.azurecontainerapps.io"
+      ]
     }
   ]
 }
