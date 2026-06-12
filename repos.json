@@ -20,6 +20,11 @@
     {
       "name": "kennethheine.com",
       "template": "static-web"
+    },
+    {
+      "name": "kontoplan",
+      "template": "container-app",
+      "auth": true
     }
   ]
 }
