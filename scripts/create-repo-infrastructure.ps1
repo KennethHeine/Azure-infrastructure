@@ -172,11 +172,14 @@ Write-Host "Step 4: Assigning Owner role on resource group '$ResourceGroupName'.
 
 $rgScope = "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName"
 
+# stderr must stay OUT of the captured value: for a freshly created SP this
+# command can emit a Graph-replication warning on stderr, and with 2>&1 that
+# text makes $existingRole truthy → the Owner assignment is silently skipped.
 $existingRole = az role assignment list `
     --assignee $appId `
     --role "Owner" `
     --scope $rgScope `
-    --query "[0].id" --output tsv --only-show-errors 2>&1
+    --query "[0].id" --output tsv --only-show-errors 2>$null
 
 if ($existingRole) {
     Write-Host "  Owner role already assigned" -ForegroundColor Yellow
