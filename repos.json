@@ -25,6 +25,11 @@
       "name": "kontoplan",
       "template": "container-app",
       "auth": true
+    },
+    {
+      "name": "inference-lab",
+      "template": "container-app",
+      "auth": true
     }
   ]
 }
