@@ -4,7 +4,8 @@ name: Container App — Deploy App (reusable)
 # (and any extra images, e.g. a sidecar/runner image) with `az acr build` — the
 # build runs inside ACR in the cloud, so the GitHub runner needs no Docker daemon
 # and the build runs next to the registry. Then it points the Container App at the
-# freshly built image.
+# freshly built image, and finally prunes stale images from the repo's ACR
+# (see the cleanup job below — it never deletes images still in use).
 #
 # Thin caller (app image only):
 #   jobs:
@@ -35,6 +36,11 @@ on:
         type: string
         required: false
         default: '[]'
+      image_retention_count:
+        description: 'How many of the newest tagged images to keep per ACR repository during post-deploy cleanup'
+        type: number
+        required: false
+        default: 5
 
 permissions:
   id-token: write
@@ -268,3 +274,115 @@ jobs:
             --resource-group '${{ needs.setup.outputs.resourceGroup }}' \
             --image "$IMAGE" \
             --only-show-errors
+
+  # Post-deploy registry cleanup. Each deploy pushes <repo>:<sha> (+ extra
+  # images) and the weekly base-image refresh leaves untagged manifests behind;
+  # nothing else ever deletes, so a Basic ACR (10 GiB included) grows past its
+  # quota into per-GiB overage. This job deletes stale manifests while NEVER
+  # touching anything that could still be pulled:
+  #   keep — any digest referenced by an active Container App revision, an ACI
+  #          container group, or a Container Apps job in this resource group
+  #          (scale-to-zero apps and ACI sessions re-pull on start, so an
+  #          in-use tag must keep resolving);
+  #        — the `latest` tag (ACI sessions are launched from it);
+  #        — the newest <image_retention_count> tagged manifests per repository
+  #          (rollback window);
+  #        — any manifest carrying a tag that is not a 40-hex git sha (human
+  #          tags like v1, base-image tags like 26-bookworm-slim);
+  #        — children of any kept multi-arch index (deleting an index's
+  #          untagged platform children corrupts the cached base image);
+  #        — anything updated in the last 24 h (races with concurrent builds).
+  # If listing in-use images fails, the job aborts BEFORE deleting anything.
+  # continue-on-error: a cleanup hiccup must not mark a successful deploy red.
+  cleanup:
+    needs: [setup, deploy]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Delete stale images (keeping anything in use)
+        shell: bash
+        env:
+          ACR: ${{ needs.setup.outputs.acrName }}
+          LOGIN: ${{ needs.setup.outputs.acrLoginServer }}
+          RG: ${{ needs.setup.outputs.resourceGroup }}
+          KEEP: ${{ inputs.image_retention_count }}
+        run: |
+          set -euo pipefail
+
+          before=$(az acr show-usage -n "$ACR" --query "value[?name=='Size'].currentValue | [0]" -o tsv)
+
+          # 1. Image refs in use anywhere in this resource group. set -e: if
+          #    any of these queries fails we abort here, deleting nothing.
+          inuse_refs=$(
+            for app in $(az containerapp list -g "$RG" --query "[].name" -o tsv); do
+              az containerapp revision list -n "$app" -g "$RG" \
+                --query "[?properties.active][].properties.template.containers[].image" -o tsv
+              az containerapp revision list -n "$app" -g "$RG" \
+                --query "[?properties.active][].properties.template.initContainers[].image" -o tsv
+            done
+            az container list -g "$RG" --query "[].containers[].image" -o tsv
+            az containerapp job list -g "$RG" --query "[].properties.template.containers[].image" -o tsv
+          )
+          inuse_refs=$(echo "$inuse_refs" | grep "^${LOGIN}/" | sed "s|^${LOGIN}/||" | sort -u || true)
+          echo "In-use image refs in this registry:"
+          echo "$inuse_refs" | sed 's/^/  /'
+
+          cutoff=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%S)
+          deleted=0
+
+          for repo in $(az acr repository list -n "$ACR" -o tsv); do
+            echo "=== repository: $repo"
+            # time_desc so the newest-N slice below is correct; if a registry
+            # ever exceeds --top, the unseen tail is simply not deleted yet.
+            meta=$(az acr manifest list-metadata -r "$ACR" -n "$repo" \
+              --orderby time_desc --top 1000 -o json --only-show-errors)
+
+            inuse_tags=$(echo "$inuse_refs" | awk -F'[:@]' -v r="$repo" '$1==r && $0 ~ /:/ {split($0,a,":"); print a[2]}' | sed 's/@.*//' || true)
+            inuse_digests=$(echo "$inuse_refs" | grep "^${repo}@" | sed 's/.*@//' || true)
+
+            keep=$(echo "$meta" | jq -r --arg cutoff "$cutoff" --argjson keep "$KEEP" \
+              --arg inuse_tags "$inuse_tags" --arg inuse_digests "$inuse_digests" '
+              ($inuse_tags    | split("\n") | map(select(length>0))) as $itags |
+              ($inuse_digests | split("\n") | map(select(length>0))) as $idigs |
+              [ .[] | select(
+                  ((.tags // []) | any(. == "latest")) or
+                  ((.tags // []) | any(test("^[0-9a-f]{40}$") | not)) or
+                  ((.tags // []) | any(. as $t | $itags | index($t))) or
+                  (.digest as $d | $idigs | index($d)) or
+                  ((.lastUpdateTime[0:19]) > $cutoff)
+                ) | .digest ] +
+              [ [ .[] | select((.tags // []) | length > 0) ] | .[0:$keep][] | .digest ]
+              | unique | .[]')
+
+            # Children of kept multi-arch indexes are kept too.
+            for d in $keep; do
+              mt=$(echo "$meta" | jq -r --arg d "$d" '.[] | select(.digest==$d) | .mediaType')
+              case "$mt" in
+                *image.index*|*manifest.list*)
+                  kids=$(az acr manifest show -r "$ACR" -n "${repo}@${d}" -o json --only-show-errors | jq -r '.manifests[].digest')
+                  keep=$(printf '%s\n%s\n' "$keep" "$kids" | sort -u)
+                  ;;
+              esac
+            done
+
+            all=$(echo "$meta" | jq -r '.[].digest')
+            for d in $(comm -23 <(echo "$all" | sort -u) <(echo "$keep" | sort -u)); do
+              tags=$(echo "$meta" | jq -r --arg d "$d" '.[] | select(.digest==$d) | (.tags // []) | join(",")')
+              echo "deleting ${repo}@${d} tags=[${tags}]"
+              if az acr repository delete -n "$ACR" --image "${repo}@${d}" --yes --only-show-errors; then
+                deleted=$((deleted+1))
+              else
+                echo "::warning::Failed to delete ${repo}@${d}; leaving it for the next run."
+              fi
+            done
+          done
+
+          after=$(az acr show-usage -n "$ACR" --query "value[?name=='Size'].currentValue | [0]" -o tsv)
+          echo "Deleted $deleted stale manifest(s). Registry usage: $((before/1024/1024)) MiB -> $((after/1024/1024)) MiB (usage metric can lag a few minutes)."

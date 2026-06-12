@@ -102,7 +102,7 @@ into each one:
 | Reusable workflow | What it does |
 |-------------------|--------------|
 | `.github/workflows/container-app-deploy-infra.yml` | Deploys the repo's `infra/main.bicep` (image-preservation on re-deploy, optional custom-domain hostname registration → bind, post-deploy re-auth, conditional Easy-Auth CLI pre-authorization). |
-| `.github/workflows/container-app-deploy-app.yml` | Builds images with **`az acr build`** (cloud build — no Docker on the runner) and points the Container App at the new image. `setup` → `build-app` ‖ `build-extra` (matrix, parallel) → `deploy`. Input `extra_images` (JSON `[{suffix,dockerfile,context}]`) builds extra images, e.g. a sidecar/runner image, each as its own parallel job. |
+| `.github/workflows/container-app-deploy-app.yml` | Builds images with **`az acr build`** (cloud build — no Docker on the runner) and points the Container App at the new image. `setup` → `build-app` ‖ `build-extra` (matrix, parallel) → `deploy` → `cleanup`. Input `extra_images` (JSON `[{suffix,dockerfile,context}]`) builds extra images, e.g. a sidecar/runner image, each as its own parallel job. The `cleanup` job prunes stale images from the repo's ACR after every successful deploy (Basic SKU has only 10 GiB included); it keeps everything referenced by active Container App revisions / ACI groups / Container Apps jobs in the RG, `latest`, the newest `image_retention_count` (default 5) tagged manifests per repository, any non-git-sha tag, multi-arch index children, and anything < 24 h old — and aborts without deleting if the in-use query fails. Cleanup failure never fails the deploy run (`continue-on-error`). |
 
 Each container-app repo keeps only **thin callers** (`deploy-infra.yml` /
 `deploy-app.yml`) that `uses:` these `@main` with `secrets: inherit`:
@@ -175,6 +175,11 @@ Access model (least-privilege, all within `rg-<repo>` — no cross-RG grants):
   assignment are all created declaratively in the template's Bicep (the SP can
   assign roles in its own RG, so no imperative pre-step is needed).
 - ACR has **admin user disabled** — identity-based access only, no secrets.
+- **Image lifecycle**: registries are Basic SKU (10 GiB included) and ACR
+  retention policies are Premium-only, so the reusable `deploy-app` workflow's
+  `cleanup` job prunes stale manifests after every successful deploy instead
+  (images are only ever *added* by deploy runs, so cleanup-on-deploy bounds
+  growth). It never deletes anything in use — see the workflow table above.
 
 This replaced an earlier design with a single shared ACR in `rg-shared` plus a
 constrained RBAC-Admin/ABAC delegation; per-repo registries remove the
