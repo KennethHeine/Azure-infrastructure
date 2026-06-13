@@ -35,6 +35,7 @@
       "name": "cvr-portal",
       "template": "container-app",
       "auth": true
-    }
+    },
+    "homelab"
   ]
 }
