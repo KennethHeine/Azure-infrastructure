@@ -36,6 +36,11 @@
       "template": "container-app",
       "auth": true
     },
-    "homelab"
+    "homelab",
+    {
+      "name": "claude-portal",
+      "template": "container-app",
+      "auth": true
+    }
   ]
 }
