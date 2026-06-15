@@ -19,14 +19,6 @@
     },
     {
       "type": "CNAME",
-      "name": "claude",
-      "ttl": 3600,
-      "values": [
-        "ca-claude-runner.livelysky-81efa65b.swedencentral.azurecontainerapps.io"
-      ]
-    },
-    {
-      "type": "CNAME",
       "name": "kontoplan",
       "ttl": 3600,
       "values": [
@@ -87,6 +79,14 @@
       "ttl": 3600,
       "values": [
         "192.168.1.217"
+      ]
+    },
+    {
+      "type": "CNAME",
+      "name": "claude",
+      "ttl": 300,
+      "values": [
+        "ca-claude-portal.icybay-5734f607.swedencentral.azurecontainerapps.io"
       ]
     }
   ]
