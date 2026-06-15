@@ -368,6 +368,19 @@ role. Re-run that script if these need to be (re)granted.
   hand, `az keyvault purge --name <v> --location <loc>` yourself (subscription
   Owner scope — a repo SP scoped to its RG cannot purge a subscription-level
   deletedVault).
+- **The Easy Auth Entra app has the same soft-delete trap.** `az ad app delete`
+  only SOFT-deletes (30-day retention), and the app's `uniqueName` is
+  `uniqueString(subscription, rg.id)`-derived — identical for a same-named RG
+  recreated later. A lingering soft-deleted app keeps that uniqueName reserved,
+  so a re-onboard's Microsoft.Graph Bicep deploy can't recreate it — the
+  symptom is the *dependent* resources failing: `authServicePrincipal` →
+  *"The language expression property 'appId' doesn't exist"* and
+  `authFederatedCredential` → *"Resource '…-auth-…' does not exist"* (NOT a clear
+  "name taken" error). `decommission-repo.ps1` now permanently deletes the app
+  from `directory/deletedItems` (Step 1). To fix by hand:
+  `az rest --method DELETE --url "https://graph.microsoft.com/v1.0/directory/deletedItems/<objectId>"`
+  (find it via `…/deletedItems/microsoft.graph.application`; needs Graph
+  `Application.ReadWrite.All`).
 
 **Easy Auth:**
 - `add-repo` `auth=` writes the **ENABLE_AUTH repo variable**, and the reusable

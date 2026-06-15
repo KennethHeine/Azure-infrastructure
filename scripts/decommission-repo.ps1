@@ -95,6 +95,24 @@ if ($appId) {
                 } else {
                     Write-Host "  WARNING: Failed to delete Entra app $($app.appId)" -ForegroundColor Yellow
                 }
+                # `az ad app delete` only SOFT-deletes (30-day retention). The Easy
+                # Auth app's uniqueName is uniqueString(subscription, rg.id)-derived —
+                # identical for a same-named RG recreated later — and a soft-deleted
+                # app keeps that uniqueName reserved, so a re-onboard's
+                # Microsoft.Graph Bicep deploy can't recreate the app: it fails with
+                # the dependent SP/federatedCredential erroring "appId doesn't exist" /
+                # "Resource ... does not exist". Permanently delete it so the name is
+                # freed. (Needs Graph Application.ReadWrite.All — the onboarding SP has
+                # it.)
+                az rest --method DELETE `
+                    --url "https://graph.microsoft.com/v1.0/directory/deletedItems/$($app.id)" `
+                    --only-show-errors 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "    Purged '$($app.displayName)' from deleted items (uniqueName freed)" -ForegroundColor Green
+                } else {
+                    Write-Host "    WARNING: Could not purge '$($app.displayName)' from deleted items — a same-name re-onboard may need a manual purge" -ForegroundColor Yellow
+                }
+                $global:LASTEXITCODE = 0
             }
         } else {
             Write-Host "  Could not list owned objects — skipping" -ForegroundColor Yellow
@@ -209,7 +227,7 @@ Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Decommission Complete" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Removed: rg-$GitHubRepo (incl. its ACR + images), $ServicePrincipalName, and purged its soft-deleted Key Vault(s)" -ForegroundColor Green
+Write-Host "Removed: rg-$GitHubRepo (incl. its ACR + images), $ServicePrincipalName, the Easy Auth app, and purged the soft-deleted Key Vault(s) + Easy Auth app so a same-name re-onboard works" -ForegroundColor Green
 switch ($GitHubRepoAction) {
     "keep"    { Write-Host "The GitHub repository '$repoFullName' was kept." -ForegroundColor Cyan }
     "archive" { Write-Host "The GitHub repository '$repoFullName' was archived (read-only)." -ForegroundColor Cyan }
