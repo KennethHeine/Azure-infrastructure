@@ -36,6 +36,11 @@
       "name": "claude-portal",
       "template": "container-app",
       "auth": true
+    },
+    {
+      "name": "claude-runner",
+      "template": "container-app",
+      "auth": true
     }
   ]
 }
