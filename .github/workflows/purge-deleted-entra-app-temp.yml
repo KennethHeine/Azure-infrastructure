@@ -1,0 +1,62 @@
+name: Purge Soft-Deleted Entra App (temp)
+
+# Temporary one-off: permanently delete soft-deleted Entra app registration(s)
+# left behind for a decommissioned repo, so re-onboarding can recreate the Easy
+# Auth app. decommission-repo.ps1 deletes the Easy Auth app, but Entra deletion
+# is SOFT (30-day retention) — and the app's uniqueName is derived from
+# uniqueString(subscription().id, resourceGroup().id), identical for a same-named
+# RG recreated later. The soft-deleted app keeps that uniqueName reserved, so the
+# Microsoft.Graph Bicep extension can't create the new app (it fails, and the
+# dependent SP/federatedCredential then error with "appId doesn't exist" /
+# "Resource ... does not exist"). Runs as the central OIDC SP, which holds Graph
+# Application.ReadWrite.All. Lists first, then permanently deletes by EXACT
+# displayName match. Delete this workflow file after use.
+
+on:
+  workflow_dispatch:
+    inputs:
+      display_name:
+        description: 'Exact displayName of the soft-deleted Entra app to purge (e.g. ca-claude-runner-auth)'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Permanently delete matching soft-deleted Entra app(s)
+        uses: azure/cli@v2
+        env:
+          DISPLAY_NAME: ${{ inputs.display_name }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+            echo "Soft-deleted Entra applications named '${DISPLAY_NAME}':"
+            az rest --method GET \
+              --url "https://graph.microsoft.com/v1.0/directory/deletedItems/microsoft.graph.application?\$select=id,appId,displayName,deletedDateTime" \
+              -o json > deleted.json
+            ids=$(jq -r --arg n "$DISPLAY_NAME" '.value[] | select(.displayName == $n) | .id' deleted.json)
+            jq -r --arg n "$DISPLAY_NAME" '.value[] | select(.displayName == $n) | "  \(.displayName)  appId=\(.appId)  id=\(.id)  deleted=\(.deletedDateTime)"' deleted.json
+            if [ -z "$ids" ]; then
+              echo "No soft-deleted Entra app named '${DISPLAY_NAME}'. Nothing to purge."
+              exit 0
+            fi
+            for id in $ids; do
+              echo "Permanently deleting deleted app object id $id …"
+              az rest --method DELETE \
+                --url "https://graph.microsoft.com/v1.0/directory/deletedItems/${id}" \
+                --only-show-errors
+              echo "  purged $id"
+            done
+            echo "Done."
