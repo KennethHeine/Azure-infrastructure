@@ -36,6 +36,7 @@
       "name": "claude-runner",
       "template": "container-app",
       "auth": true
-    }
+    },
+    "claude-runner-test"
   ]
 }
