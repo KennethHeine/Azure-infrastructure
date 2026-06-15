@@ -86,7 +86,7 @@
       "name": "claude",
       "ttl": 300,
       "values": [
-        "ca-claude-portal.icybay-5734f607.swedencentral.azurecontainerapps.io"
+        "ca-claude-runner.prouddune-982184eb.swedencentral.azurecontainerapps.io"
       ]
     }
   ]
