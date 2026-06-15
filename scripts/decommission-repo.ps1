@@ -95,6 +95,24 @@ if ($appId) {
                 } else {
                     Write-Host "  WARNING: Failed to delete Entra app $($app.appId)" -ForegroundColor Yellow
                 }
+                # `az ad app delete` only SOFT-deletes (30-day retention). The Easy
+                # Auth app's uniqueName is uniqueString(subscription, rg.id)-derived —
+                # identical for a same-named RG recreated later — and a soft-deleted
+                # app keeps that uniqueName reserved, so a re-onboard's
+                # Microsoft.Graph Bicep deploy can't recreate the app: it fails with
+                # the dependent SP/federatedCredential erroring "appId doesn't exist" /
+                # "Resource ... does not exist". Permanently delete it so the name is
+                # freed. (Needs Graph Application.ReadWrite.All — the onboarding SP has
+                # it.)
+                az rest --method DELETE `
+                    --url "https://graph.microsoft.com/v1.0/directory/deletedItems/$($app.id)" `
+                    --only-show-errors 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "    Purged '$($app.displayName)' from deleted items (uniqueName freed)" -ForegroundColor Green
+                } else {
+                    Write-Host "    WARNING: Could not purge '$($app.displayName)' from deleted items — a same-name re-onboard may need a manual purge" -ForegroundColor Yellow
+                }
+                $global:LASTEXITCODE = 0
             }
         } else {
             Write-Host "  Could not list owned objects — skipping" -ForegroundColor Yellow
@@ -140,6 +158,40 @@ if ($rgExists -eq "true") {
 $global:LASTEXITCODE = 0
 Write-Host ""
 
+# ─── Step 3b: Purge soft-deleted Key Vaults that belonged to this RG ─
+# Deleting the resource group only SOFT-deletes its Key Vault(s); the name
+# lingers in the subscription's soft-delete retention (default 90 days). The
+# container-app template derives the vault name from
+# uniqueString(resourceGroup().id) — identical for a same-named RG recreated
+# later — so a lingering soft-deleted vault blocks re-onboarding with
+# "A vault with the same name already exists in deleted state" (the deploy fails
+# at the Key Vault resource). Purge the vaults that belonged to this RG so the
+# name is free to recreate. Purge is a subscription-scope action; the onboarding
+# SP is subscription Owner, so it can. Match on the deleted vault's original
+# vaultId (PowerShell -like is case-insensitive) rather than a name prefix, so
+# we only ever purge vaults from THIS repo's RG.
+Write-Host "Step 3b: Purging soft-deleted Key Vaults from '$ResourceGroupName'..." -ForegroundColor Cyan
+$allDeleted = az keyvault list-deleted -o json --only-show-errors 2>$null | ConvertFrom-Json
+$deletedVaults = @($allDeleted | Where-Object { $_.properties.vaultId -like "*/resourceGroups/$ResourceGroupName/*" })
+if ($deletedVaults.Count -eq 0) {
+    Write-Host "  No soft-deleted Key Vaults to purge for this RG" -ForegroundColor Yellow
+} else {
+    foreach ($v in $deletedVaults) {
+        Write-Host "  Purging soft-deleted vault '$($v.name)' ($($v.properties.location))..." -NoNewline
+        az keyvault purge --name $v.name --location $v.properties.location --only-show-errors 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host " purged" -ForegroundColor Green
+        } else {
+            # Don't fail the teardown: a purge-protected vault can't be purged
+            # until retention expires, and the RG/SP are already gone. Warn so a
+            # later same-name re-onboard knows it must purge (or rename) first.
+            Write-Host " WARNING: purge failed (purge protection, or already purged)" -ForegroundColor Yellow
+        }
+        $global:LASTEXITCODE = 0
+    }
+}
+Write-Host ""
+
 # ─── Step 4: Archive or delete the GitHub repository ─────────────────
 if ($GitHubRepoAction -ne "keep") {
     Write-Host "Step 4: $($GitHubRepoAction)ing GitHub repository '$repoFullName'..." -ForegroundColor Cyan
@@ -175,7 +227,7 @@ Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Decommission Complete" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Removed: rg-$GitHubRepo (incl. its ACR + images), $ServicePrincipalName" -ForegroundColor Green
+Write-Host "Removed: rg-$GitHubRepo (incl. its ACR + images), $ServicePrincipalName, the Easy Auth app, and purged the soft-deleted Key Vault(s) + Easy Auth app so a same-name re-onboard works" -ForegroundColor Green
 switch ($GitHubRepoAction) {
     "keep"    { Write-Host "The GitHub repository '$repoFullName' was kept." -ForegroundColor Cyan }
     "archive" { Write-Host "The GitHub repository '$repoFullName' was archived (read-only)." -ForegroundColor Cyan }

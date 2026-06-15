@@ -358,6 +358,29 @@ role. Re-run that script if these need to be (re)granted.
   onboarding recreates it). Cognitive Services accounts **soft-delete** with the
   RG and block same-name recreation — recover with `properties.restore: true`
   for one deploy, then revert.
+- **Key Vaults also soft-delete** with the RG (default 90-day retention) and
+  block same-name recreation with *"A vault with the same name already exists in
+  deleted state"*. The container-app template's vault name derives from
+  `uniqueString(resourceGroup().id)`, which is **identical for a same-named RG
+  recreated later** — so a decommission→re-onboard of the same repo hits this at
+  the Key Vault resource. `decommission-repo.ps1` now purges the RG's
+  soft-deleted vault(s) (Step 3b) so the name is freed; if you tear an RG down by
+  hand, `az keyvault purge --name <v> --location <loc>` yourself (subscription
+  Owner scope — a repo SP scoped to its RG cannot purge a subscription-level
+  deletedVault).
+- **The Easy Auth Entra app has the same soft-delete trap.** `az ad app delete`
+  only SOFT-deletes (30-day retention), and the app's `uniqueName` is
+  `uniqueString(subscription, rg.id)`-derived — identical for a same-named RG
+  recreated later. A lingering soft-deleted app keeps that uniqueName reserved,
+  so a re-onboard's Microsoft.Graph Bicep deploy can't recreate it — the
+  symptom is the *dependent* resources failing: `authServicePrincipal` →
+  *"The language expression property 'appId' doesn't exist"* and
+  `authFederatedCredential` → *"Resource '…-auth-…' does not exist"* (NOT a clear
+  "name taken" error). `decommission-repo.ps1` now permanently deletes the app
+  from `directory/deletedItems` (Step 1). To fix by hand:
+  `az rest --method DELETE --url "https://graph.microsoft.com/v1.0/directory/deletedItems/<objectId>"`
+  (find it via `…/deletedItems/microsoft.graph.application`; needs Graph
+  `Application.ReadWrite.All`).
 
 **Easy Auth:**
 - `add-repo` `auth=` writes the **ENABLE_AUTH repo variable**, and the reusable
