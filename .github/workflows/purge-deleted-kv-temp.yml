@@ -1,0 +1,59 @@
+name: Purge Soft-Deleted Key Vault (temp)
+
+# Temporary one-off: purge soft-deleted Key Vault(s) left behind for a
+# decommissioned repo, so the same-named RG can be re-onboarded/redeployed.
+# decommission-repo.ps1 deletes the RG (soft-deleting its KV) but never purges
+# the vault — and the Bicep KV name is derived from uniqueString(rg.id), which
+# is identical for a recreated same-named RG, so the lingering soft-deleted
+# vault blocks recreation with ConflictError. Runs as the central Azure OIDC
+# identity (subscription-scoped — the repo SP is only RG Owner and cannot purge
+# a subscription-level deletedVault). Delete this file after use.
+
+on:
+  workflow_dispatch:
+    inputs:
+      prefix:
+        description: 'Soft-deleted vault NAME PREFIX to purge (e.g. kvclauderunner)'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Purge matching soft-deleted vaults
+        uses: azure/cli@v2
+        env:
+          PREFIX: ${{ inputs.prefix }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+            echo "Soft-deleted vaults matching prefix '${PREFIX}':"
+            az keyvault list-deleted \
+              --query "[?starts_with(name, '${PREFIX}')].{name:name, location:properties.location, purgeDate:properties.scheduledPurgeDate}" \
+              -o table
+            mapfile -t rows < <(az keyvault list-deleted \
+              --query "[?starts_with(name, '${PREFIX}')].[name, properties.location]" -o tsv)
+            if [ "${#rows[@]}" -eq 0 ]; then
+              echo "No soft-deleted vaults match prefix '${PREFIX}'. Nothing to purge."
+              exit 0
+            fi
+            for row in "${rows[@]}"; do
+              name=$(echo "$row" | cut -f1)
+              loc=$(echo "$row" | cut -f2)
+              echo "Purging vault '$name' in '$loc'…"
+              az keyvault purge --name "$name" --location "$loc" --only-show-errors
+              echo "  purged $name"
+            done
+            echo "Done."
