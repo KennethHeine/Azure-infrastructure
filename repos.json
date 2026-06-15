@@ -37,6 +37,10 @@
       "template": "container-app",
       "auth": true
     },
-    "claude-runner-test"
+    {
+      "name": "claude-runner-test",
+      "template": "container-app",
+      "auth": true
+    }
   ]
 }
