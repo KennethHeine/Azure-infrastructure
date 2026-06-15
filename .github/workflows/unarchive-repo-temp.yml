@@ -1,0 +1,36 @@
+name: Unarchive Repo (temp)
+
+# Temporary one-off: unarchive a repo so it can be re-onboarded/redeployed.
+# Runs with AUTOMATION_GITHUB_TOKEN (has Administration:write — it is what
+# archives repos during decommission). Delete this file after use.
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Repository name to unarchive (under KennethHeine)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  unarchive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Unarchive repository
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
+          REPO_NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          echo "Unarchiving KennethHeine/${REPO_NAME}…"
+          gh api -X PATCH "repos/KennethHeine/${REPO_NAME}" -F archived=false
+          state=$(gh api "repos/KennethHeine/${REPO_NAME}" --jq '.archived')
+          echo "archived=${state}"
+          if [ "${state}" != "false" ]; then
+            echo "::error::Repo still archived"
+            exit 1
+          fi
+          echo "Done."
