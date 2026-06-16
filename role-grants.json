@@ -9,12 +9,12 @@
       "roles": ["Reader", "Log Analytics Reader"]
     },
     {
-      "comment": "claude-runner-TEST broker: drive the experimental homelab (Azure Arc) session backend — open an SSH-over-Arc tunnel into the dockhost machine and run bootstrap/lifecycle commands (Run Command). Scoped to the single dockhost resource in rg-homelab (cross-RG, so it cannot live in the test repo's own Bicep). Sandbox-only; remove if the homelab backend experiment is dropped. See claude-runner-test PLAN.md.",
+      "comment": "claude-runner-TEST broker: drive the experimental homelab (Azure Arc) session backend — open an Entra SSH-over-Arc tunnel into the dockhost machine and run bootstrap/lifecycle commands (Run Command). 'Virtual Machine User Login' = Entra-based SSH, which the transport spike proved works (no local users, no stored keys). Scoped to the single dockhost resource in rg-homelab (cross-RG, so it cannot live in the test repo's own Bicep). Sandbox-only; remove if the homelab backend experiment is dropped. See claude-runner-test PLAN.md + docs/homelab-arc-backend.md.",
       "identityName": "id-claude-runner-test",
       "identityResourceGroup": "rg-claude-runner-test",
       "scope": "resource",
       "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-homelab/providers/Microsoft.HybridCompute/machines/dockhost",
-      "roles": ["Virtual Machine Local User Login", "Azure Connected Machine Resource Administrator"]
+      "roles": ["Virtual Machine User Login", "Azure Connected Machine Resource Administrator"]
     }
   ]
 }
