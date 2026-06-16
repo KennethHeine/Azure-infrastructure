@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Estate-wide RBAC grants",
-  "description": "Role assignments that exceed a single repo's resource-group scope (e.g. subscription-scope read access for a user-assigned managed identity). Applied idempotently by scripts/apply-role-grants.ps1 during onboarding — repo-scoped RBAC belongs in each repo's own Bicep instead.",
+  "description": "Role assignments that exceed a single repo's resource-group scope, applied idempotently by scripts/apply-role-grants.ps1 during onboarding. Two cases: 'subscription' scope (e.g. read access for a user-assigned identity), and 'resource' scope on a resource OUTSIDE the identity's own repo RG (e.g. the claude-runner-test broker needing rights on an Azure Arc machine in rg-homelab) — which the repo's own SP cannot assign because it is Owner of only its RG. Repo-scoped RBAC on a resource INSIDE the repo's RG still belongs in that repo's own Bicep instead.",
   "type": "object",
   "required": ["grants"],
   "properties": {
@@ -27,8 +27,12 @@
           },
           "scope": {
             "type": "string",
-            "enum": ["subscription"],
-            "description": "Assignment scope. Only subscription is supported — anything narrower belongs in the owning repo's Bicep."
+            "enum": ["subscription", "resource"],
+            "description": "Assignment scope. 'subscription' = the whole subscription. 'resource' = a single resource named by scopeResourceId (for cross-RG grants the owning repo's SP cannot make itself). Anything inside the identity's own repo RG belongs in that repo's Bicep."
+          },
+          "scopeResourceId": {
+            "type": "string",
+            "description": "Full ARM resource ID to scope the assignment to. Required when scope is 'resource'; ignored for 'subscription'."
           },
           "roles": {
             "type": "array",
@@ -36,7 +40,16 @@
             "items": { "type": "string" },
             "description": "Built-in role names to assign (e.g. Reader, Log Analytics Reader)."
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "scope": { "const": "resource" } },
+              "required": ["scope"]
+            },
+            "then": { "required": ["scopeResourceId"] }
+          }
+        ]
       }
     }
   }

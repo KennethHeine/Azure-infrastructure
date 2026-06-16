@@ -1,10 +1,13 @@
 # Apply estate-wide RBAC grants from role-grants.json
 #
 # Repo-scoped RBAC lives in each repo's own Bicep (its SP is Owner of its RG).
-# Grants that EXCEED a repo's scope — e.g. subscription-level Reader for the
-# claude-runner coder-session identity — cannot be created by the repo's own
-# SP, so they are declared here and applied by the onboarding SP (subscription
-# Owner). This keeps every cross-RG permission under code control and review.
+# Grants that EXCEED a repo's scope cannot be created by the repo's own SP, so
+# they are declared here and applied by the onboarding SP (subscription Owner).
+# This keeps every cross-RG permission under code control and review. Two scopes:
+#   * subscription — e.g. subscription Reader for the coder-session identity.
+#   * resource     — a single resource OUTSIDE the identity's repo RG, named by
+#                    scopeResourceId (e.g. the claude-runner-test broker needing
+#                    SSH + Run Command on the Azure Arc machine in rg-homelab).
 #
 # Idempotent — existing assignments are skipped. An identity that does not
 # exist yet (its repo's infra deploy hasn't run) is a warning, not a failure;
@@ -68,9 +71,20 @@ foreach ($grant in $grants) {
         continue
     }
 
-    # Only subscription scope is supported (schema-enforced); narrower scopes
-    # belong in the owning repo's Bicep.
-    $scope = "/subscriptions/$subscriptionId"
+    # Resolve the assignment scope. 'subscription' = the whole subscription;
+    # 'resource' = the literal scopeResourceId (a cross-RG resource the repo SP
+    # cannot grant on itself). Schema requires scopeResourceId when resource.
+    if ($grant.scope -eq "resource") {
+        if (-not $grant.scopeResourceId) {
+            Write-Host "::error::Grant for $name has scope 'resource' but no scopeResourceId — skipping."
+            $failed = $true
+            continue
+        }
+        $scope = $grant.scopeResourceId
+    }
+    else {
+        $scope = "/subscriptions/$subscriptionId"
+    }
 
     foreach ($role in $grant.roles) {
         $existing = az role assignment list --assignee $principalId --role $role --scope $scope --query '[0].id' -o tsv 2>$null
