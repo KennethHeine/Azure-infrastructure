@@ -46,6 +46,10 @@
       "name": "oliver-demo",
       "template": "container-app",
       "auth": false
+    },
+    {
+      "name": "mayer",
+      "template": "static-web"
     }
   ]
 }
