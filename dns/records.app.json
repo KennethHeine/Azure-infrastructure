@@ -112,6 +112,14 @@
       "values": [
         "BF866F688DE63855C1E584D7CFEA69698949BBD2BF44A5F478CDA1198B1D5023"
       ]
+    },
+    {
+      "type": "CNAME",
+      "name": "meyer",
+      "ttl": 3600,
+      "values": [
+        "delightful-plant-069825803.7.azurestaticapps.net"
+      ]
     }
   ]
 }
