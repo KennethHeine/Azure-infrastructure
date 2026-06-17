@@ -104,6 +104,14 @@
       "values": [
         "ca-oliver-demo.thankfulforest-2f4d5d07.swedencentral.azurecontainerapps.io"
       ]
+    },
+    {
+      "type": "TXT",
+      "name": "asuid.oliver",
+      "ttl": 3600,
+      "values": [
+        "BF866F688DE63855C1E584D7CFEA69698949BBD2BF44A5F478CDA1198B1D5023"
+      ]
     }
   ]
 }
