@@ -50,6 +50,10 @@
     {
       "name": "mayer",
       "template": "static-web"
+    },
+    {
+      "name": "meyer",
+      "template": "static-web"
     }
   ]
 }
