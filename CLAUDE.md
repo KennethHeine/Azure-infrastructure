@@ -70,18 +70,28 @@ starts using a new Azure resource type. Schema: `providers.schema.json`.
 
 Estate-wide **RBAC grants that exceed a single repo's resource-group scope**.
 Repo-scoped RBAC belongs in each repo's own Bicep (its SP is Owner of its RG);
-a subscription-scope assignment can't be created by a repo SP, so it is
-declared here and applied by the onboarding SP (subscription Owner) via
-`scripts/apply-role-grants.ps1` — `process-repos.ps1` runs it right after
-provider registration. Idempotent; an identity whose repo hasn't deployed yet
-is a warning, not a failure (re-run **Onboard Repositories** after that repo's
-infra deploy). Schema: `role-grants.schema.json`.
+grants a repo SP can't make itself are declared here and applied by the
+onboarding SP (subscription Owner) via `scripts/apply-role-grants.ps1` —
+`process-repos.ps1` runs it right after provider registration. Idempotent; an
+identity whose repo hasn't deployed yet is a warning, not a failure (re-run
+**Onboard Repositories** after that repo's infra deploy). Schema:
+`role-grants.schema.json`. Two `scope`s: `subscription`, or `resource` (a
+single resource OUTSIDE the identity's repo RG, named by `scopeResourceId`).
 
-Current grants: the `claude-runner` **coder-session identity**
-(`id-claude-runner-session-coder`) gets subscription **Reader** + **Log
-Analytics Reader** — read-only estate visibility (resource state + runtime
-logs) for the autonomous coding agent, which still cannot change Azure outside
-GitHub Actions.
+Current grants:
+- `claude-runner` **coder-session identity** (`id-claude-runner-session-coder`)
+  → subscription **Reader** + **Log Analytics Reader** — read-only estate
+  visibility for the autonomous coding agent (still can't change Azure outside
+  GitHub Actions).
+- `claude-runner-test` **broker** (`id-claude-runner-test`) → **Virtual Machine
+  User Login** (grants the HybridConnectivity relay access every `az ssh arc`
+  needs) + **Azure Connected Machine Resource Administrator** (Run Command),
+  scoped to the **`dockhost`** Azure Arc machine (rg-homelab) — lets the test
+  broker SSH-over-Arc into the homelab and run commands, for the experimental
+  homelab/Docker session backend. The broker is a managed identity, and Entra
+  SSH certs are issued only to interactive users, so it authenticates with an
+  **ephemeral local-user key** (regenerated each boot, pushed via Run Command,
+  never stored). Sandbox-only.
 
 ## Templates (GitHub template repositories)
 
