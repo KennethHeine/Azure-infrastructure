@@ -96,6 +96,14 @@
       "values": [
         "polite-sand-0107e7b03.7.azurestaticapps.net"
       ]
+    },
+    {
+      "type": "CNAME",
+      "name": "oliver",
+      "ttl": 3600,
+      "values": [
+        "ca-oliver-demo.thankfulforest-2f4d5d07.swedencentral.azurecontainerapps.io"
+      ]
     }
   ]
 }
