@@ -84,11 +84,14 @@ Current grants:
   visibility for the autonomous coding agent (still can't change Azure outside
   GitHub Actions).
 - `claude-runner-test` **broker** (`id-claude-runner-test`) → **Virtual Machine
-  User Login** (Entra SSH — the transport spike proved Entra login works, so no
-  local-user/key path is needed) + **Azure Connected Machine Resource
-  Administrator** scoped to the **`dockhost`** Azure Arc machine (rg-homelab) —
-  lets the test broker SSH-over-Arc into the homelab and run commands, for the
-  experimental homelab/Docker session backend. Sandbox-only.
+  User Login** (grants the HybridConnectivity relay access every `az ssh arc`
+  needs) + **Azure Connected Machine Resource Administrator** (Run Command),
+  scoped to the **`dockhost`** Azure Arc machine (rg-homelab) — lets the test
+  broker SSH-over-Arc into the homelab and run commands, for the experimental
+  homelab/Docker session backend. The broker is a managed identity, and Entra
+  SSH certs are issued only to interactive users, so it authenticates with an
+  **ephemeral local-user key** (regenerated each boot, pushed via Run Command,
+  never stored). Sandbox-only.
 
 ## Templates (GitHub template repositories)
 
