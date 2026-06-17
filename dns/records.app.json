@@ -88,6 +88,14 @@
       "values": [
         "ca-claude-runner.prouddune-982184eb.swedencentral.azurecontainerapps.io"
       ]
+    },
+    {
+      "type": "CNAME",
+      "name": "mayer",
+      "ttl": 3600,
+      "values": [
+        "polite-sand-0107e7b03.7.azurestaticapps.net"
+      ]
     }
   ]
 }
