@@ -128,6 +128,14 @@
       "values": [
         "ca-meyer-party.wonderfulbay-a1e30408.swedencentral.azurecontainerapps.io"
       ]
+    },
+    {
+      "type": "TXT",
+      "name": "asuid.meyer-party",
+      "ttl": 3600,
+      "values": [
+        "BF866F688DE63855C1E584D7CFEA69698949BBD2BF44A5F478CDA1198B1D5023"
+      ]
     }
   ]
 }
