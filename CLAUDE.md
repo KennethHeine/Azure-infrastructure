@@ -97,7 +97,7 @@ Current grants:
 
 | Template | Repo | What you get |
 |----------|------|--------------|
-| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, **its own per-repo ACR** with image pull via a user-assigned managed identity granted AcrPull (all declared in the template's Bicep, in `rg-<repo>`), secret-less **Entra Easy Auth** (default on), optional **custom domain** (managed cert), `deploy-infra` + `deploy-app` workflows that are **thin callers of the reusable workflows below**. `deploy-app` builds the image with **`az acr build`** (cloud build) and updates the app. |
+| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, **its own per-repo ACR** with image pull via a user-assigned managed identity granted AcrPull (all declared in the template's Bicep, in `rg-<repo>`), secret-less **Entra Easy Auth** (default on), optional **custom domain** (managed cert), `deploy-infra` + `deploy-app` workflows that are **thin callers of the reusable workflows below**. `deploy-app` builds the image with **Docker on the GitHub runner** and updates the app. |
 | `static-web` | [`KennethHeine/template-static-web`](https://github.com/KennethHeine/template-static-web) | Next.js static export → **Azure Static Web Apps**, open/public, `deploy-infra` + `deploy` (prod + PR preview) workflows that are **thin callers of the reusable workflows below**. The SWA deployment token is **fetched at deploy time via OIDC** — no stored secret, no manual onboarding step. |
 
 New repos are created with `gh repo create --template`. Templated repos keep
@@ -112,7 +112,7 @@ into each one:
 | Reusable workflow | What it does |
 |-------------------|--------------|
 | `.github/workflows/container-app-deploy-infra.yml` | Deploys the repo's `infra/main.bicep` (image-preservation on re-deploy, optional custom-domain hostname registration → bind, post-deploy re-auth, conditional Easy-Auth CLI pre-authorization). |
-| `.github/workflows/container-app-deploy-app.yml` | Builds images with **`az acr build`** (cloud build — no Docker on the runner) and points the Container App at the new image. `setup` → `build-app` ‖ `build-extra` (matrix, parallel) → `deploy` → `cleanup`. Input `extra_images` (JSON `[{suffix,dockerfile,context}]`) builds extra images, e.g. a sidecar/runner image, each as its own parallel job. The `cleanup` job prunes stale images from the repo's ACR after every successful deploy (Basic SKU has only 10 GiB included); it keeps everything referenced by active Container App revisions / ACI groups / Container Apps jobs in the RG, `latest`, the newest `image_retention_count` (default 5) tagged manifests per repository, any non-git-sha tag, multi-arch index children, and anything < 24 h old — and aborts without deleting if the in-use query fails. Cleanup failure never fails the deploy run (`continue-on-error`). |
+| `.github/workflows/container-app-deploy-app.yml` | Builds images with **Docker on the GitHub runner** (`az acr login` → `docker build` → `docker push`; formerly `az acr build` cloud build — moved off ACR Tasks so deploys survive that pool's regional outages) and points the Container App at the new image. `setup` → `build-app` ‖ `build-extra` (matrix, parallel) → `deploy` → `cleanup`. Input `extra_images` (JSON `[{suffix,dockerfile,context}]`) builds extra images, e.g. a sidecar/runner image, each as its own parallel job. The `cleanup` job prunes stale images from the repo's ACR after every successful deploy (Basic SKU has only 10 GiB included); it keeps everything referenced by active Container App revisions / ACI groups / Container Apps jobs in the RG, `latest`, the newest `image_retention_count` (default 5) tagged manifests per repository, any non-git-sha tag, multi-arch index children, and anything < 24 h old — and aborts without deleting if the in-use query fails. Cleanup failure never fails the deploy run (`continue-on-error`). |
 
 Each container-app repo keeps only **thin callers** (`deploy-infra.yml` /
 `deploy-app.yml`) that `uses:` these `@main` with `secrets: inherit`:
@@ -179,7 +179,7 @@ per repo.
 
 Access model (least-privilege, all within `rg-<repo>` — no cross-RG grants):
 - The repo's SP is **Owner of `rg-<repo>`**, so it can create the ACR and build/push
-  images (via `az acr build` — cloud build) with no extra role assignment.
+  images (the runner `az acr login`s and `docker push`es) with no extra role assignment.
 - The Container App pulls with a **user-assigned managed identity** granted
   **AcrPull** on that ACR. The identity, the ACR, and the AcrPull role
   assignment are all created declaratively in the template's Bicep (the SP can
@@ -418,5 +418,6 @@ role. Re-run that script if these need to be (re)granted.
 - **Base images through ACR**: container-app Dockerfiles should declare
   `ARG ACR_LOGIN_SERVER=docker.io` and `FROM ${ACR_LOGIN_SERVER}/<path>:<tag>`
   — the reusable deploy-app workflow injects the repo ACR's login server and
-  lazily imports/refreshes the base image (Docker Hub anonymous pulls 429
-  under ACR's shared egress IP; anonymous cache *rules* are blocked by Azure).
+  lazily imports/refreshes the base image, and the runner pulls it from the ACR
+  (Docker Hub anonymous pulls 429 under shared CI egress IPs; anonymous cache
+  *rules* are blocked by Azure).
