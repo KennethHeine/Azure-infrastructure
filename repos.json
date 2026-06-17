@@ -41,6 +41,11 @@
       "name": "claude-runner-test",
       "template": "container-app",
       "auth": true
+    },
+    {
+      "name": "oliver-demo",
+      "template": "container-app",
+      "auth": false
     }
   ]
 }
