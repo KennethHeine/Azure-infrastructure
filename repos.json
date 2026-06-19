@@ -64,11 +64,6 @@
       "name": "tabt-arbejdsfortjeneste",
       "template": "container-app",
       "auth": true
-    },
-    {
-      "name": "meyer-party-test",
-      "template": "container-app",
-      "auth": false
     }
   ]
 }
