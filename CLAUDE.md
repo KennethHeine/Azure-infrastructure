@@ -92,6 +92,9 @@ Current grants:
   SSH certs are issued only to interactive users, so it authenticates with an
   **ephemeral local-user key** (regenerated each boot, pushed via Run Command,
   never stored). Sandbox-only.
+- `claude-runner` **PROD broker** (`id-claude-runner`) → the same two roles on
+  the **`dockhost`** Arc machine — the production form of the test-broker grant
+  above, for the homelab session backend now promoted to prod.
 
 ## Templates (GitHub template repositories)
 
