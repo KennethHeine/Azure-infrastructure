@@ -1,11 +1,14 @@
 name: Container App — Deploy App (reusable)
 
 # Reusable app-deploy workflow for every container-app repo. Builds the app image
-# (and any extra images, e.g. a sidecar/runner image) with `az acr build` — the
-# build runs inside ACR in the cloud, so the GitHub runner needs no Docker daemon
-# and the build runs next to the registry. Then it points the Container App at the
-# freshly built image, and finally prunes stale images from the repo's ACR
-# (see the cleanup job below — it never deletes images still in use).
+# (and any extra images, e.g. a sidecar/runner image) with Docker on the GitHub
+# runner and pushes to the repo's own ACR. (It used to cloud-build with
+# `az acr build`, but ACR Tasks' shared agent pool can suffer regional outages
+# that leave every build Queued indefinitely — e.g. Sweden Central, 2026-06-17 —
+# so the build now runs on the runner and no longer depends on that pool.) Then it
+# points the Container App at the freshly built image, and finally prunes stale
+# images from the repo's ACR (see the cleanup job below — it never deletes images
+# still in use).
 #
 # Thin caller (app image only):
 #   jobs:
@@ -23,10 +26,9 @@ name: Container App — Deploy App (reusable)
 #
 # extra_images is a JSON array; for each entry the image is pushed as
 # <repo><suffix>:<sha> and <repo><suffix>:latest, built from <context> using
-# <dockerfile> (dockerfile path is relative to context). Prefer context "." (repo
-# root) with the dockerfile path from the root, e.g. "runner/Dockerfile" — az acr
-# build resolves --file against the source root, so a subdir context can pick up
-# the wrong Dockerfile.
+# <dockerfile>. Prefer context "." (repo root) with the dockerfile path from the
+# root, e.g. "runner/Dockerfile" — `docker build --file <dockerfile> <context>`
+# resolves the dockerfile path relative to the checkout root, not the context.
 
 on:
   workflow_call:
@@ -98,9 +100,11 @@ jobs:
           echo "acrName=$ACR_NAME" >> "$GITHUB_OUTPUT"
           echo "acrLoginServer=$ACR_LOGIN_SERVER" >> "$GITHUB_OUTPUT"
 
-  # Keep Docker Hub base images cached in the repo's own ACR. `az acr build`
-  # agents pull from Docker Hub anonymously via a shared egress IP, which
-  # intermittently 429s (toomanyrequests) and fails builds. Convention: a
+  # Keep Docker Hub base images cached in the repo's own ACR. The runner's
+  # `docker build` pulls base images from Docker Hub anonymously, which from
+  # shared CI egress IPs intermittently 429s (toomanyrequests) and fails builds.
+  # Pulling them through the ACR cache (authenticated) instead dodges that.
+  # Convention: a
   # Dockerfile opts in by declaring `ARG ACR_LOGIN_SERVER=docker.io` and using
   # `FROM ${ACR_LOGIN_SERVER}/<path>:<tag>` (local builds fall back to Docker
   # Hub). This job scans the repo's Dockerfiles for those references and lazily
@@ -181,7 +185,8 @@ jobs:
             if [ "$stale" = 1 ]; then import_ref "$ref" "$had_copy"; else echo "Fresh enough — no Docker Hub hit for ${ref}."; fi
           done <<< "$REFS"
 
-  # Build + push the primary app image (cloud build in ACR).
+  # Build + push the primary app image on the runner (Docker preinstalled on
+  # ubuntu-latest).
   build-app:
     needs: [setup, prime-base-images]
     runs-on: ubuntu-latest
@@ -196,21 +201,33 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build app image
+      - name: Build & push app image
         shell: bash
+        env:
+          ACR_NAME: ${{ needs.setup.outputs.acrName }}
+          LOGIN: ${{ needs.setup.outputs.acrLoginServer }}
+          REPO: ${{ github.event.repository.name }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          REPO='${{ github.event.repository.name }}'
-          # Expose this repo's ACR login server so a Dockerfile can pull base
-          # images through an ACR pull-through cache (avoids Docker Hub's
-          # anonymous pull-rate limit). Dockerfiles that don't declare the
+          # az acr login authenticates Docker to this repo's ACR — both to push
+          # the result and to pull any base image referenced through the ACR
+          # cache (FROM ${ACR_LOGIN_SERVER}/...). The Owner-on-its-RG SP that runs
+          # this has ACR push/pull rights, so no extra role assignment is needed.
+          # ACR_LOGIN_SERVER lets a Dockerfile use that cache to dodge Docker
+          # Hub's anonymous pull-rate limit; Dockerfiles that don't declare the
           # ARG simply ignore it (BuildKit warns, build still succeeds).
-          az acr build \
-            --registry '${{ needs.setup.outputs.acrName }}' \
-            --build-arg ACR_LOGIN_SERVER='${{ needs.setup.outputs.acrLoginServer }}' \
-            --image "${REPO}:${{ github.sha }}" \
-            --image "${REPO}:latest" \
+          # --platform linux/amd64: Container Apps run amd64 (ubuntu-latest is
+          # already amd64, so this is a no-op match, not emulation).
+          az acr login --name "$ACR_NAME"
+          docker build \
+            --platform linux/amd64 \
+            --build-arg ACR_LOGIN_SERVER="$LOGIN" \
+            --tag "${LOGIN}/${REPO}:${SHA}" \
+            --tag "${LOGIN}/${REPO}:latest" \
             --file Dockerfile .
+          docker push "${LOGIN}/${REPO}:${SHA}"
+          docker push "${LOGIN}/${REPO}:latest"
 
   # Build + push any extra images (e.g. a per-session runner image), one parallel
   # job per entry. Skipped entirely when the caller passes no extra_images.
@@ -232,21 +249,31 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build extra image
+      - name: Build & push extra image
         shell: bash
+        env:
+          ACR_NAME: ${{ needs.setup.outputs.acrName }}
+          LOGIN: ${{ needs.setup.outputs.acrLoginServer }}
+          REPO: ${{ github.event.repository.name }}
+          SHA: ${{ github.sha }}
+          SUFFIX: ${{ matrix.image.suffix }}
+          DOCKERFILE: ${{ matrix.image.dockerfile }}
+          CONTEXT: ${{ matrix.image.context }}
         run: |
           set -euo pipefail
-          REPO='${{ github.event.repository.name }}'
-          SUFFIX='${{ matrix.image.suffix }}'
-          # See build-app: ACR_LOGIN_SERVER lets a Dockerfile cache base images
-          # through this repo's ACR; ignored by Dockerfiles that don't use it.
-          az acr build \
-            --registry '${{ needs.setup.outputs.acrName }}' \
-            --build-arg ACR_LOGIN_SERVER='${{ needs.setup.outputs.acrLoginServer }}' \
-            --image "${REPO}${SUFFIX}:${{ github.sha }}" \
-            --image "${REPO}${SUFFIX}:latest" \
-            --file '${{ matrix.image.dockerfile }}' \
-            '${{ matrix.image.context }}'
+          # See build-app: az acr login authenticates Docker to this repo's ACR
+          # for push and ACR-cached base-image pulls; ACR_LOGIN_SERVER lets a
+          # Dockerfile use that cache (ignored by Dockerfiles that don't).
+          az acr login --name "$ACR_NAME"
+          docker build \
+            --platform linux/amd64 \
+            --build-arg ACR_LOGIN_SERVER="$LOGIN" \
+            --tag "${LOGIN}/${REPO}${SUFFIX}:${SHA}" \
+            --tag "${LOGIN}/${REPO}${SUFFIX}:latest" \
+            --file "$DOCKERFILE" \
+            "$CONTEXT"
+          docker push "${LOGIN}/${REPO}${SUFFIX}:${SHA}"
+          docker push "${LOGIN}/${REPO}${SUFFIX}:latest"
 
   # Point the Container App at the freshly built app image. Runs once all builds
   # are done; tolerates build-extra being skipped (no extra images).
