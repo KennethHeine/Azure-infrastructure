@@ -52,10 +52,6 @@
       "template": "static-web"
     },
     {
-      "name": "meyer",
-      "template": "static-web"
-    },
-    {
       "name": "meyer-party",
       "template": "container-app",
       "auth": false
