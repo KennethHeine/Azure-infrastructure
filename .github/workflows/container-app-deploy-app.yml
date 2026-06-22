@@ -41,6 +41,11 @@ on:
         type: number
         required: false
         default: 5
+      app_image_cache:
+        description: 'How to build the app image: "acr" (default, az acr build — cloud build, no cross-run layer cache) or "gha" (buildx on the runner with a GitHub Actions layer cache, e.g. to cache an unchanged npm ci across deploys, then push to ACR)'
+        type: string
+        required: false
+        default: 'acr'
 
 permissions:
   id-token: write
@@ -196,7 +201,10 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build app image
+      # Default path: cloud build in ACR (no Docker on the runner). Classic
+      # builder — no cross-run layer cache, so every deploy rebuilds all layers.
+      - name: Build app image (az acr build)
+        if: ${{ inputs.app_image_cache != 'gha' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -211,6 +219,36 @@ jobs:
             --image "${REPO}:${{ github.sha }}" \
             --image "${REPO}:latest" \
             --file Dockerfile .
+
+      # Opt-in path (app_image_cache: gha): build with BuildKit on the runner so a
+      # GitHub Actions layer cache can skip unchanged layers (e.g. npm ci when the
+      # lockfile is unchanged) across deploys, then push to ACR. `az acr login`
+      # gives the runner pull access to the repo's ACR (so FROM ${ACR_LOGIN_SERVER}/…
+      # base images resolve there, same Docker-Hub-429 dodge as the cloud build) and
+      # push access for the built image. provenance:false keeps a single manifest per
+      # tag (matches az acr build, so the deploy/cleanup jobs see the image by sha).
+      - name: Set up Buildx
+        if: ${{ inputs.app_image_cache == 'gha' }}
+        uses: docker/setup-buildx-action@v4
+      - name: ACR login (buildx pull + push)
+        if: ${{ inputs.app_image_cache == 'gha' }}
+        shell: bash
+        run: az acr login --name '${{ needs.setup.outputs.acrName }}'
+      - name: Build app image (buildx + GitHub Actions layer cache)
+        if: ${{ inputs.app_image_cache == 'gha' }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          provenance: false
+          build-args: |
+            ACR_LOGIN_SERVER=${{ needs.setup.outputs.acrLoginServer }}
+          tags: |
+            ${{ needs.setup.outputs.acrLoginServer }}/${{ github.event.repository.name }}:${{ github.sha }}
+            ${{ needs.setup.outputs.acrLoginServer }}/${{ github.event.repository.name }}:latest
+          cache-from: type=gha,scope=${{ github.event.repository.name }}-app
+          cache-to: type=gha,scope=${{ github.event.repository.name }}-app,mode=max
 
   # Build + push any extra images (e.g. a per-session runner image), one parallel
   # job per entry. Skipped entirely when the caller passes no extra_images.
