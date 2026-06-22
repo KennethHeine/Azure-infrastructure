@@ -479,12 +479,16 @@ if (-not $ghToken) {
         }
 
         # Flexible federated credential trusting ANY branch (refs/heads/*) — a
-        # wildcard claimsMatchingExpression rather than an exact subject.
+        # wildcard claimsMatchingExpression rather than an exact subject. For APP
+        # registrations this is only on the Graph BETA endpoint; the v1.0
+        # `az ad app federated-credential create` rejects claimsMatchingExpression,
+        # so create it via `az rest` against beta using the app OBJECT id.
         $ficName = "github-actions-branches"
         $existingFic = az ad app federated-credential list --id $previewAppId --query "[?name=='$ficName'].name" --output tsv --only-show-errors
         if ($existingFic) {
             Write-Host "  Federated credential '$ficName' already exists" -ForegroundColor Yellow
         } else {
+            $previewObjId = az ad app show --id $previewAppId --query id --output tsv --only-show-errors
             $ficBody = [ordered]@{
                 name      = $ficName
                 issuer    = "https://token.actions.githubusercontent.com"
@@ -493,14 +497,22 @@ if (-not $ghToken) {
                     value           = "claims['sub'] matches 'repo:$GitHubOrg/${GitHubRepo}:ref:refs/heads/*'"
                     languageVersion = 1
                 }
-            } | ConvertTo-Json -Depth 5
+            } | ConvertTo-Json -Depth 5 -Compress
             $ficTmp = New-TemporaryFile
+            # No-BOM UTF-8 (pwsh 7 default for -Encoding utf8) — a BOM breaks az rest body parsing.
             $ficBody | Out-File -FilePath $ficTmp.FullName -Encoding utf8
-            az ad app federated-credential create --id $previewAppId --parameters $ficTmp.FullName --only-show-errors 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "  Created wildcard federated credential (refs/heads/*)" -ForegroundColor Green
+            if ($previewObjId) {
+                az rest --method POST `
+                    --url "https://graph.microsoft.com/beta/applications/$previewObjId/federatedIdentityCredentials" `
+                    --headers "Content-Type=application/json" `
+                    --body "@$($ficTmp.FullName)" --only-show-errors 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "  Created wildcard federated credential (refs/heads/*)" -ForegroundColor Green
+                } else {
+                    Write-Host "  WARNING: wildcard FIC create failed (az rest beta) — branch OIDC won't work until fixed" -ForegroundColor Yellow
+                }
             } else {
-                Write-Host "  WARNING: wildcard FIC create failed — needs an az new enough for claimsMatchingExpression (flexible FIC)" -ForegroundColor Yellow
+                Write-Host "  WARNING: could not resolve preview app object id; skipped FIC" -ForegroundColor Yellow
             }
             Remove-Item $ficTmp.FullName -ErrorAction SilentlyContinue
             $global:LASTEXITCODE = 0
