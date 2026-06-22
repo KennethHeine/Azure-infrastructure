@@ -37,7 +37,14 @@ param(
 
     # For container-app repos: enable Entra built-in auth by default. Surfaced as
     # a repo variable so the app's Bicep/workflows can read it.
-    [bool]$EnableAuth = $true
+    [bool]$EnableAuth = $true,
+
+    # Opt-in per-branch preview environment. When true, also create an isolated
+    # rg-<repo>-preview + sp-<repo>-preview-github (Owner of that RG only,
+    # federated to ANY branch) so non-main branches can deploy to a sandbox that
+    # has no path to prod. Surfaced as repo secret AZURE_CLIENT_ID_PREVIEW + var
+    # RESOURCE_GROUP_PREVIEW for the deploy workflows to route to.
+    [bool]$Preview = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -431,6 +438,97 @@ if (-not $ghToken) {
         $global:LASTEXITCODE = 0
     }
     Write-Host ""
+
+    # ─── Step 8c: Preview environment (opt-in: repos.json "preview": true) ──
+    # An isolated sandbox so NON-main branches can deploy with no path to prod.
+    # Isolation comes from a SEPARATE identity, not the credential: an OIDC token
+    # doesn't carry its branch into role scope, so the preview SP is Owner of
+    # rg-<repo>-preview ONLY and is federated to ANY branch (refs/heads/*).
+    # main keeps using the prod SP — the deploy workflow routes by ref. The
+    # preview RG starts empty; the first branch deploy-infra populates it (its own
+    # ACR + app), so onboarding stays cheap. Idempotent.
+    if ($Preview) {
+        Write-Host "Step 8c: Preview environment for '$GitHubRepo'..." -ForegroundColor Cyan
+        $previewRg     = "rg-$GitHubRepo-preview"
+        $previewSpName = "sp-$GitHubRepo-preview-github"
+
+        az group create --name $previewRg --location $Location --only-show-errors | Out-Null
+
+        # App registration (idempotent)
+        $previewAppId = az ad app list --display-name $previewSpName --query "[0].appId" --output tsv --only-show-errors
+        if (-not $previewAppId) {
+            $previewAppId = az ad app create --display-name $previewSpName --query "appId" --output tsv --only-show-errors
+            if ($LASTEXITCODE -ne 0 -or -not $previewAppId) {
+                Write-Host "  ERROR: failed to create preview app registration" -ForegroundColor Red; exit 1
+            }
+            Write-Host "  Created preview app (appId: $previewAppId); waiting for replication..." -ForegroundColor Green
+            Start-Sleep -Seconds 15
+        } else {
+            Write-Host "  Preview app already exists (appId: $previewAppId)" -ForegroundColor Yellow
+        }
+
+        # Service principal (idempotent, replication retry)
+        $previewSpId = az ad sp list --display-name $previewSpName --query "[?appId=='$previewAppId'].id | [0]" --output tsv --only-show-errors
+        if (-not $previewSpId) {
+            for ($i = 1; $i -le 5; $i++) {
+                az ad sp create --id $previewAppId --only-show-errors 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) { break }
+                Write-Host "  SP create attempt $i/5 failed, retrying in 10s..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 10
+            }
+        }
+
+        # Flexible federated credential trusting ANY branch (refs/heads/*) — a
+        # wildcard claimsMatchingExpression rather than an exact subject.
+        $ficName = "github-actions-branches"
+        $existingFic = az ad app federated-credential list --id $previewAppId --query "[?name=='$ficName'].name" --output tsv --only-show-errors
+        if ($existingFic) {
+            Write-Host "  Federated credential '$ficName' already exists" -ForegroundColor Yellow
+        } else {
+            $ficBody = [ordered]@{
+                name      = $ficName
+                issuer    = "https://token.actions.githubusercontent.com"
+                audiences = @("api://AzureADTokenExchange")
+                claimsMatchingExpression = [ordered]@{
+                    value           = "claims['sub'] matches 'repo:$GitHubOrg/${GitHubRepo}:ref:refs/heads/*'"
+                    languageVersion = 1
+                }
+            } | ConvertTo-Json -Depth 5
+            $ficTmp = New-TemporaryFile
+            $ficBody | Out-File -FilePath $ficTmp.FullName -Encoding utf8
+            az ad app federated-credential create --id $previewAppId --parameters $ficTmp.FullName --only-show-errors 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Created wildcard federated credential (refs/heads/*)" -ForegroundColor Green
+            } else {
+                Write-Host "  WARNING: wildcard FIC create failed — needs an az new enough for claimsMatchingExpression (flexible FIC)" -ForegroundColor Yellow
+            }
+            Remove-Item $ficTmp.FullName -ErrorAction SilentlyContinue
+            $global:LASTEXITCODE = 0
+        }
+
+        # Owner on the preview RG ONLY (replication retry) — never on rg-<repo>.
+        $previewScope = "/subscriptions/$subscriptionId/resourceGroups/$previewRg"
+        $existingPreviewRole = az role assignment list --assignee $previewAppId --role "Owner" --scope $previewScope --query "[0].id" --output tsv --only-show-errors 2>$null
+        if ($existingPreviewRole) {
+            Write-Host "  Owner role already assigned on $previewRg" -ForegroundColor Yellow
+        } else {
+            for ($r = 1; $r -le 5; $r++) {
+                az role assignment create --assignee $previewAppId --role "Owner" --scope $previewScope --only-show-errors 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) { break }
+                Write-Host "  Preview role attempt $r/5 failed, retrying in 10s..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 10
+            }
+            Write-Host "  Owner role assigned on $previewRg" -ForegroundColor Green
+        }
+
+        # Repo secret + var the deploy workflows route non-main branches to.
+        Write-Host "  Setting AZURE_CLIENT_ID_PREVIEW secret + RESOURCE_GROUP_PREVIEW var..." -NoNewline
+        $previewAppId | gh secret set AZURE_CLIENT_ID_PREVIEW --repo $repoFullName 2>&1 | Out-Null
+        gh variable set RESOURCE_GROUP_PREVIEW --repo $repoFullName --body $previewRg 2>&1 | Out-Null
+        Write-Host " done" -ForegroundColor Green
+        Write-Host ""
+        $global:LASTEXITCODE = 0
+    }
 
     # ─── Steps 9-10: Seed README + agent guide files ────────────────
     # Skipped for templated repos: the template repository already ships its

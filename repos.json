@@ -35,7 +35,8 @@
     {
       "name": "claude-runner",
       "template": "container-app",
-      "auth": true
+      "auth": true,
+      "preview": true
     },
     {
       "name": "claude-runner-test",

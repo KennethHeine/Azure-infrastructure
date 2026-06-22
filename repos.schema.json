@@ -40,6 +40,11 @@
                 "type": "boolean",
                 "default": true,
                 "description": "container-app only: enable Entra built-in auth (Easy Auth). Default true."
+              },
+              "preview": {
+                "type": "boolean",
+                "default": false,
+                "description": "Create a per-branch preview environment: an isolated rg-<name>-preview + sp-<name>-preview-github (Owner of that RG only, federated to any branch) so non-main branches can deploy to a sandbox, never to prod. Default false."
               }
             }
           }

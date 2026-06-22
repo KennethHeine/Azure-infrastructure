@@ -103,10 +103,12 @@ foreach ($repoEntry in $repos) {
         $repoName   = $repoEntry
         $template   = 'none'
         $enableAuth = $true
+        $preview    = $false
     } else {
         $repoName   = $repoEntry.name
         $template   = if ($repoEntry.template) { $repoEntry.template } else { 'none' }
         $enableAuth = if ($null -ne $repoEntry.auth) { [bool]$repoEntry.auth } else { $true }
+        $preview    = if ($null -ne $repoEntry.preview) { [bool]$repoEntry.preview } else { $false }
     }
 
     Write-Host "=========================================" -ForegroundColor Magenta
@@ -116,7 +118,7 @@ foreach ($repoEntry in $repos) {
 
     try {
         & $onboardScript -GitHubRepo $repoName -GitHubOrg $gitHubOrg -Location $location `
-            -Template $template -EnableAuth $enableAuth
+            -Template $template -EnableAuth $enableAuth -Preview $preview
         if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
             throw "Script exited with code $LASTEXITCODE"
         }
