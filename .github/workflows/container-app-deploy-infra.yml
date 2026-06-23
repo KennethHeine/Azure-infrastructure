@@ -103,13 +103,18 @@ jobs:
             # the binding to SNI. On the first-ever deploy the app doesn't exist yet,
             # so binding is skipped this run and completed on the next deploy. Repos
             # with no customDomain in parameters.json always get bindCustomDomain=false.
-            # Preview never touches the prod custom domain: force it empty and
-            # override the parameters.json value so Bicep configures no hostname
-            # (preview is reached on its own default Container App FQDN).
-            DOMAIN_ARGS=()
+            # Preview overrides (parameters.json defaults are tuned for prod):
+            #  - customDomain='': never bind the prod hostname; preview uses its
+            #    own default Container App FQDN.
+            #  - enableAlerts=false: the app's Log Analytics alert rules query
+            #    ContainerAppConsoleLogs_CL, which doesn't exist in a brand-new
+            #    env (no logs ingested yet) → the rule deploy fails validation.
+            #    A preview sandbox doesn't need prod alerting. Apps without an
+            #    enableAlerts param simply ignore the override.
+            PREVIEW_ARGS=()
             if [ "${IS_PREVIEW:-false}" = "true" ]; then
               CUSTOM_DOMAIN=""
-              DOMAIN_ARGS=(customDomain="")
+              PREVIEW_ARGS=(customDomain="" enableAlerts=false)
             else
               CUSTOM_DOMAIN=$(jq -r '.parameters.customDomain.value // ""' infra/main.parameters.json)
             fi
@@ -152,7 +157,7 @@ jobs:
                 "${IMAGE_ARGS[@]}" \
                 "${BIND_ARGS[@]}" \
                 "${AUTH_ARGS[@]}" \
-                "${DOMAIN_ARGS[@]}" \
+                "${PREVIEW_ARGS[@]}" \
               --only-show-errors
 
             get_output() {
