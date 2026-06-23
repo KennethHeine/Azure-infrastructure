@@ -533,6 +533,38 @@ if (-not $ghToken) {
             Write-Host "  Owner role assigned on $previewRg" -ForegroundColor Green
         }
 
+        # Easy Auth in the preview env creates its OWN Entra app via the Graph
+        # Bicep extension (running as the preview SP), so the preview SP needs the
+        # same Microsoft Graph Application.ReadWrite.OwnedBy the prod SP gets in
+        # Step 5b — without it the preview deploy fails at /resources/authApp with
+        # Authorization_RequestDenied. Only when the repo uses auth.
+        if ($EnableAuth) {
+            if (-not $previewSpId) {
+                $previewSpId = az ad sp list --display-name $previewSpName --query "[?appId=='$previewAppId'].id | [0]" --output tsv --only-show-errors
+            }
+            $pvGraphRoleId = "18a4783c-866b-4cc7-a460-3d5e5662c884"  # Application.ReadWrite.OwnedBy
+            $pvGraphSpId = az ad sp show --id "00000003-0000-0000-c000-000000000000" --query "id" --output tsv --only-show-errors
+            if ($previewSpId -and $pvGraphSpId) {
+                $pvExistingGrant = az rest --method GET `
+                    --url "https://graph.microsoft.com/v1.0/servicePrincipals/$previewSpId/appRoleAssignments" `
+                    --query "value[?appRoleId=='$pvGraphRoleId'] | [0].id" --output tsv --only-show-errors 2>&1
+                if ($pvExistingGrant) {
+                    Write-Host "  Preview SP: Application.ReadWrite.OwnedBy already granted" -ForegroundColor Yellow
+                } else {
+                    $pvGrantBody = "{`"principalId`":`"$previewSpId`",`"resourceId`":`"$pvGraphSpId`",`"appRoleId`":`"$pvGraphRoleId`"}"
+                    az rest --method POST `
+                        --url "https://graph.microsoft.com/v1.0/servicePrincipals/$previewSpId/appRoleAssignments" `
+                        --headers "Content-Type=application/json" --body $pvGrantBody --only-show-errors 2>&1 | Out-Null
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "  Preview SP: granted Application.ReadWrite.OwnedBy" -ForegroundColor Green
+                    } else {
+                        Write-Host "  WARNING: preview SP Graph grant failed — preview Easy Auth deploy may fail" -ForegroundColor Yellow
+                    }
+                    $global:LASTEXITCODE = 0
+                }
+            }
+        }
+
         # Repo secret + var the deploy workflows route non-main branches to.
         Write-Host "  Setting AZURE_CLIENT_ID_PREVIEW secret + RESOURCE_GROUP_PREVIEW var..." -NoNewline
         $previewAppId | gh secret set AZURE_CLIENT_ID_PREVIEW --repo $repoFullName 2>&1 | Out-Null
