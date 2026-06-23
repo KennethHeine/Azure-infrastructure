@@ -1,5 +1,13 @@
 # Plan: per-branch preview environments (claude-runner first, opt-in)
 
+> **Status: SHIPPED + validated (2026-06-23).** All increments below are merged and a
+> `test/**` branch deploys green to `rg-claude-runner-preview`. Canonical operating
+> docs are now in `CLAUDE.md` → "Per-branch preview environments"; this file is the
+> design record. Increment 3 landed as: per-deploy `cleanup` already prunes the
+> preview ACR + `decommission-repo.ps1` Step 3c tears the preview footprint down
+> (the aggressive idle-teardown sweeper was dropped — scale-to-zero + keep-standing
+> was chosen for fast feedback).
+
 ## Context / why
 Today only `main` + PRs can OIDC into Azure (the repo SP's federated credentials
 are `ref:refs/heads/main` and `pull_request`). So a `workflow_dispatch` from a
