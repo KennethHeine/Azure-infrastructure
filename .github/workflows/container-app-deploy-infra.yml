@@ -17,6 +17,12 @@ name: Container App — Deploy Infrastructure (reusable)
 
 on:
   workflow_call:
+    inputs:
+      preview:
+        description: 'Enable per-branch preview routing: on a non-main ref, deploy as the preview SP (secrets.AZURE_CLIENT_ID_PREVIEW) into vars.RESOURCE_GROUP_PREVIEW instead of prod. Default false (every existing caller is unchanged).'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   id-token: write
@@ -25,6 +31,12 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # On a non-main ref with preview enabled, assume the preview SP (Owner of the
+    # preview RG only) — it can never touch prod. main, and every non-preview
+    # caller, keep using the prod SP. Secrets can't be job outputs, so the
+    # selection is an inline ternary at each azure/login.
+    env:
+      IS_PREVIEW: ${{ inputs.preview && github.ref != 'refs/heads/main' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -32,7 +44,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ (inputs.preview && github.ref != 'refs/heads/main') && secrets.AZURE_CLIENT_ID_PREVIEW || secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
@@ -45,13 +57,19 @@ jobs:
         uses: azure/cli@v2
         env:
           ENABLE_AUTH_VAR: ${{ vars.ENABLE_AUTH }}
+          IS_PREVIEW: ${{ inputs.preview && github.ref != 'refs/heads/main' }}
+          RG_PROD: ${{ vars.RESOURCE_GROUP }}
+          RG_PREVIEW: ${{ vars.RESOURCE_GROUP_PREVIEW }}
         with:
           inlineScript: |
             set -euo pipefail
 
-            RESOURCE_GROUP='${{ vars.RESOURCE_GROUP }}'
-            if [ -z "$RESOURCE_GROUP" ]; then
-              RESOURCE_GROUP="rg-${{ github.event.repository.name }}"
+            # Preview: deploy into the isolated preview RG (the SP we logged in as
+            # is Owner of only that RG). Otherwise prod.
+            if [ "${IS_PREVIEW:-false}" = "true" ]; then
+              RESOURCE_GROUP="${RG_PREVIEW:-rg-${{ github.event.repository.name }}-preview}"
+            else
+              RESOURCE_GROUP="${RG_PROD:-rg-${{ github.event.repository.name }}}"
             fi
             # appName defaults to the repo name (sanitized) unless parameters.json overrides.
             APP_NAME=$(jq -r '.parameters.appName.value // "app"' infra/main.parameters.json)
@@ -85,7 +103,16 @@ jobs:
             # the binding to SNI. On the first-ever deploy the app doesn't exist yet,
             # so binding is skipped this run and completed on the next deploy. Repos
             # with no customDomain in parameters.json always get bindCustomDomain=false.
-            CUSTOM_DOMAIN=$(jq -r '.parameters.customDomain.value // ""' infra/main.parameters.json)
+            # Preview never touches the prod custom domain: force it empty and
+            # override the parameters.json value so Bicep configures no hostname
+            # (preview is reached on its own default Container App FQDN).
+            DOMAIN_ARGS=()
+            if [ "${IS_PREVIEW:-false}" = "true" ]; then
+              CUSTOM_DOMAIN=""
+              DOMAIN_ARGS=(customDomain="")
+            else
+              CUSTOM_DOMAIN=$(jq -r '.parameters.customDomain.value // ""' infra/main.parameters.json)
+            fi
             BIND_ARGS=(bindCustomDomain=false)
             if [ -n "$CUSTOM_DOMAIN" ] && [ "$CUSTOM_DOMAIN" != "null" ] && [ -n "$currentImage" ]; then
               if az containerapp hostname list --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" \
@@ -125,6 +152,7 @@ jobs:
                 "${IMAGE_ARGS[@]}" \
                 "${BIND_ARGS[@]}" \
                 "${AUTH_ARGS[@]}" \
+                "${DOMAIN_ARGS[@]}" \
               --only-show-errors
 
             get_output() {
@@ -154,7 +182,7 @@ jobs:
       - name: Re-authenticate to Azure (post-deploy)
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ (inputs.preview && github.ref != 'refs/heads/main') && secrets.AZURE_CLIENT_ID_PREVIEW || secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 

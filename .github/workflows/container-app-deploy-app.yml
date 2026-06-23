@@ -46,6 +46,11 @@ on:
         type: string
         required: false
         default: 'acr'
+      preview:
+        description: 'Enable per-branch preview routing: on a non-main ref, build/deploy as the preview SP (secrets.AZURE_CLIENT_ID_PREVIEW) into vars.RESOURCE_GROUP_PREVIEW, and force the app to min-replicas 0. Default false (every existing caller is unchanged).'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   id-token: write
@@ -68,19 +73,26 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ (inputs.preview && github.ref != 'refs/heads/main') && secrets.AZURE_CLIENT_ID_PREVIEW || secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Derive names and discover ACR
         id: derive
         shell: bash
+        env:
+          IS_PREVIEW: ${{ inputs.preview && github.ref != 'refs/heads/main' }}
+          RG_PROD: ${{ vars.RESOURCE_GROUP }}
+          RG_PREVIEW: ${{ vars.RESOURCE_GROUP_PREVIEW }}
         run: |
           set -euo pipefail
 
-          RESOURCE_GROUP='${{ vars.RESOURCE_GROUP }}'
-          if [ -z "$RESOURCE_GROUP" ]; then
-            RESOURCE_GROUP="rg-${{ github.event.repository.name }}"
+          # Preview branch → the isolated preview RG (and its own ACR, discovered
+          # below); otherwise prod. The login above used the matching SP.
+          if [ "${IS_PREVIEW:-false}" = "true" ]; then
+            RESOURCE_GROUP="${RG_PREVIEW:-rg-${{ github.event.repository.name }}-preview}"
+          else
+            RESOURCE_GROUP="${RG_PROD:-rg-${{ github.event.repository.name }}}"
           fi
           # appName defaults to the repo name (sanitized) unless parameters.json overrides.
           APP_NAME=$(jq -r '.parameters.appName.value // "app"' infra/main.parameters.json)
@@ -136,7 +148,7 @@ jobs:
         if: ${{ steps.scan.outputs.refs != '' }}
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ (inputs.preview && github.ref != 'refs/heads/main') && secrets.AZURE_CLIENT_ID_PREVIEW || secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
@@ -197,7 +209,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ (inputs.preview && github.ref != 'refs/heads/main') && secrets.AZURE_CLIENT_ID_PREVIEW || secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
@@ -266,7 +278,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ (inputs.preview && github.ref != 'refs/heads/main') && secrets.AZURE_CLIENT_ID_PREVIEW || secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
@@ -296,22 +308,33 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ (inputs.preview && github.ref != 'refs/heads/main') && secrets.AZURE_CLIENT_ID_PREVIEW || secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Update Container App
         shell: bash
+        env:
+          IS_PREVIEW: ${{ inputs.preview && github.ref != 'refs/heads/main' }}
         run: |
           set -euo pipefail
           REPO='${{ github.event.repository.name }}'
+          APP='${{ needs.setup.outputs.containerAppName }}'
+          RG='${{ needs.setup.outputs.resourceGroup }}'
           IMAGE='${{ needs.setup.outputs.acrLoginServer }}/'"${REPO}:${{ github.sha }}"
-          echo "Updating ${{ needs.setup.outputs.containerAppName }} with image $IMAGE"
-          az containerapp update \
-            --name '${{ needs.setup.outputs.containerAppName }}' \
-            --resource-group '${{ needs.setup.outputs.resourceGroup }}' \
-            --image "$IMAGE" \
-            --only-show-errors
+          # Preview sandboxes must always scale to zero (compute → ~$0 when idle),
+          # forced here app-agnostically so it holds regardless of the app's Bicep
+          # — claude-runner's PROD broker deliberately runs min-replicas 1 for the
+          # homelab Arc tunnel, and preview overrides that to 0 in the same update.
+          if [ "${IS_PREVIEW:-false}" = "true" ]; then
+            echo "Preview: updating $APP with $IMAGE and forcing min-replicas 0"
+            az containerapp update --name "$APP" --resource-group "$RG" \
+              --image "$IMAGE" --min-replicas 0 --only-show-errors
+          else
+            echo "Updating $APP with image $IMAGE"
+            az containerapp update --name "$APP" --resource-group "$RG" \
+              --image "$IMAGE" --only-show-errors
+          fi
 
   # Post-deploy registry cleanup. Each deploy pushes <repo>:<sha> (+ extra
   # images) and the weekly base-image refresh leaves untagged manifests behind;
@@ -344,7 +367,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ (inputs.preview && github.ref != 'refs/heads/main') && secrets.AZURE_CLIENT_ID_PREVIEW || secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
