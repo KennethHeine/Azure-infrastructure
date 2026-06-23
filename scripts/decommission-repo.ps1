@@ -5,7 +5,10 @@
 #      federated credentials + its rg-scoped role assignments)
 #   2. Deletes the resource group rg-<repo> (Container App, env, Log Analytics,
 #      the repo's own ACR + images, managed identity, etc.)
-#   3. (Optional) Archives (read-only) or deletes the GitHub repository
+#   3. Tears down the preview environment too if the repo had one
+#      ("preview": true): sp-<repo>-preview-github (+ its Easy Auth app) and
+#      rg-<repo>-preview (Step 3c).
+#   4. (Optional) Archives (read-only) or deletes the GitHub repository
 #
 # The repo's container registry now lives inside rg-<repo>, so it (and its
 # images) are removed when the resource group is deleted — no shared-registry
@@ -191,6 +194,70 @@ if ($deletedVaults.Count -eq 0) {
     }
 }
 Write-Host ""
+
+# ─── Step 3c: Tear down the preview environment (if any) ─────────────
+# Repos onboarded with "preview": true also have an isolated
+# sp-<repo>-preview-github (+ its own Easy Auth app) and rg-<repo>-preview
+# (its own ACR/app/vault/identity). Mirror Steps 1-3b for them so a
+# decommission leaves no preview footprint behind. Best-effort + idempotent.
+$previewSpName = "sp-$GitHubRepo-preview-github"
+$previewRgName = "rg-$GitHubRepo-preview"
+$previewAppId  = az ad app list --display-name $previewSpName --query "[0].appId" --output tsv --only-show-errors
+$previewRgExists = az group exists --name $previewRgName --only-show-errors
+if ($previewAppId -or $previewRgExists -eq "true") {
+    Write-Host "Step 3c: Tearing down preview environment ($previewSpName + $previewRgName)..." -ForegroundColor Cyan
+
+    # Entra apps owned by the preview SP (its Easy Auth app) — delete + purge so
+    # the uniqueName is freed for a same-name re-onboard (see Step 1).
+    if ($previewAppId) {
+        $previewSpObjId = az ad sp list --display-name $previewSpName --query "[0].id" --output tsv --only-show-errors
+        if ($previewSpObjId) {
+            $ownedJsonPv = az rest --method GET `
+                --url "https://graph.microsoft.com/v1.0/servicePrincipals/$previewSpObjId/ownedObjects" `
+                --output json --only-show-errors 2>&1
+            if ($LASTEXITCODE -eq 0 -and $ownedJsonPv) {
+                $ownedPv = $ownedJsonPv | ConvertFrom-Json
+                foreach ($app in @($ownedPv.value | Where-Object { $_.'@odata.type' -eq '#microsoft.graph.application' -and $_.appId -ne $previewAppId })) {
+                    az ad app delete --id $app.appId --only-show-errors 2>&1 | Out-Null
+                    az rest --method DELETE --url "https://graph.microsoft.com/v1.0/directory/deletedItems/$($app.id)" --only-show-errors 2>&1 | Out-Null
+                    Write-Host "  Deleted + purged preview Entra app '$($app.displayName)'" -ForegroundColor Green
+                    $global:LASTEXITCODE = 0
+                }
+            }
+        }
+        # Delete the preview app registration (removes the SP + the wildcard FIC).
+        az ad app delete --id $previewAppId --only-show-errors 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  Deleted preview app registration ($previewAppId)" -ForegroundColor Green
+        } else {
+            Write-Host "  WARNING: failed to delete preview app registration $previewAppId" -ForegroundColor Yellow
+        }
+        $global:LASTEXITCODE = 0
+    }
+
+    # Delete the preview RG (its own ACR + app + vault + identity).
+    if ($previewRgExists -eq "true") {
+        az group delete --name $previewRgName --yes --only-show-errors 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  Deleted resource group '$previewRgName'" -ForegroundColor Green
+        } else {
+            Write-Host "  WARNING: failed to delete '$previewRgName'" -ForegroundColor Yellow
+        }
+        $global:LASTEXITCODE = 0
+    }
+
+    # Purge soft-deleted Key Vaults that belonged to the preview RG (Step 3b).
+    $allDeletedPv = az keyvault list-deleted -o json --only-show-errors 2>$null | ConvertFrom-Json
+    foreach ($v in @($allDeletedPv | Where-Object { $_.properties.vaultId -like "*/resourceGroups/$previewRgName/*" })) {
+        az keyvault purge --name $v.name --location $v.properties.location --only-show-errors 2>&1 | Out-Null
+        Write-Host "  Purged soft-deleted preview vault '$($v.name)'" -ForegroundColor Green
+        $global:LASTEXITCODE = 0
+    }
+    Write-Host ""
+} else {
+    Write-Host "Step 3c: No preview environment for '$GitHubRepo' — skipping" -ForegroundColor Yellow
+    Write-Host ""
+}
 
 # ─── Step 4: Archive or delete the GitHub repository ─────────────────
 if ($GitHubRepoAction -ne "keep") {

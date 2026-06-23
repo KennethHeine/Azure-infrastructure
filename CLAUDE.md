@@ -46,8 +46,10 @@ template) or an object selecting a template:
 ```
 
 `template`: `container-app` | `static-web` | `none`. `auth` (container-app only,
-default **true**) toggles Entra built-in auth. Schema: `repos.schema.json`.
-Onboarding is **idempotent** — re-running never duplicates resources.
+default **true**) toggles Entra built-in auth. `preview` (default **false**)
+opts the repo into **per-branch preview environments** (see that section below).
+Schema: `repos.schema.json`. Onboarding is **idempotent** — re-running never
+duplicates resources.
 
 ## Config: `providers.json`
 
@@ -216,6 +218,59 @@ So the chain is: `setup-service-principal.ps1` → onboarding SP can grant app r
 deploy creates its own Easy Auth app. The Easy Auth **token store is not enabled**
 (it requires a backing blob-storage SAS URL this template doesn't provision).
 
+## Per-branch preview environments (opt-in)
+
+A container-app repo with `"preview": true` in `repos.json` gets an **isolated
+sandbox** so non-`main` branches can deploy without any path to prod. Today only
+`claude-runner` opts in; the OIDC/routing mechanism is generic.
+
+**Why a separate identity.** A GitHub OIDC token doesn't carry its branch into
+Azure role scope, so isolation can't come from the credential — it comes from a
+**separate SP**:
+
+- Onboarding (`create-repo-infrastructure.ps1`, Step 8c) creates, alongside the
+  prod footprint: `rg-<repo>-preview`, `sp-<repo>-preview-github` (**Owner of
+  `rg-<repo>-preview` only** — it physically can't touch prod), a **flexible
+  federated credential** trusting **any branch** (`claims['sub'] matches
+  'repo:<org>/<repo>:ref:refs/heads/*'` — a wildcard FIC, which for app
+  registrations is **Graph beta only**, so it's created via `az rest` against
+  `beta/applications/{objectId}/federatedIdentityCredentials`, not
+  `az ad app federated-credential create`), the same Graph
+  `Application.ReadWrite.OwnedBy` grant the prod SP gets (so preview Easy Auth
+  works), and the repo secret **`AZURE_CLIENT_ID_PREVIEW`** + variable
+  **`RESOURCE_GROUP_PREVIEW`**.
+- The prod SP is unchanged (`main` + PRs, Owner of `rg-<repo>`).
+
+**Routing (reusable workflows).** Both `container-app-deploy-infra.yml` and
+`container-app-deploy-app.yml` take a `preview` input (default false). When a
+caller sets it AND `github.ref != refs/heads/main`, every `azure/login` uses the
+preview SP (inline ternary — secrets can't be job outputs) and the deploy targets
+`vars.RESOURCE_GROUP_PREVIEW`. Preview also forces `customDomain=''` (never binds
+the prod hostname — preview is reached on its default FQDN) and `enableAlerts=false`
+(a fresh env has no `ContainerAppConsoleLogs_CL` table yet, which would fail the
+alert-rule deploy). `deploy-app` forces the app to **`--min-replicas 0`** so the
+sandbox scales to zero. Non-preview callers resolve to the prod SP/RG — byte-identical.
+
+**The caller opts in** (`claude-runner`'s `deploy-infra.yml`/`deploy-app.yml`):
+`with: { preview: true }`, a `test/**` push trigger, and the prod-only `verify`
+job is skipped on non-`main`. So **push a `test/**` branch → preview; `main` → prod.**
+deploy-app concurrency is keyed per `github.ref` so prod and preview deploys
+never cancel each other.
+
+**Base-split + preview ACR.** Because `claude-runner`'s slim Dockerfiles `FROM`
+its base images, a fresh (empty) preview ACR can't resolve them and
+`prime-base-images` can't import internal `*-base` from Docker Hub. So
+`claude-runner`'s `build-base-images.yml` has a **`preview-seed`** job that builds
+the bases into the preview ACR too, as the preview SP (gated on
+`RESOURCE_GROUP_PREVIEW`).
+
+**Cost.** Compute scales to zero; the only standing cost is the preview ACR
+(~$5/mo Basic). Infra is kept standing (no idle teardown) for fast feedback — a
+test iteration runs only `deploy-app` (~1-2 min), not `deploy-infra`. The
+per-deploy `cleanup` job prunes the preview ACR's image tags like prod's.
+`decommission-repo.ps1` (Step 3c) tears the whole preview footprint down with the
+repo. Full design + history: `PLAN-preview-env.md`.
+
 ## Operating it
 
 ### Add a repo (preferred: the workflow)
@@ -231,7 +286,8 @@ push triggers onboarding). Then watch **Onboard Repositories**.
 Run **Decommission Repo** (`decommission-repo.yml`) — you must type the repo name
 into `confirm`. It removes the repos.json entry and deletes `rg-<repo>` (which
 includes the repo's own ACR + images), the SP, **any Entra apps the SP owns
-(e.g. the Easy Auth app)**, and — per the `github_repo` input — **keeps**,
+(e.g. the Easy Auth app)**, **the preview footprint if any (`sp-<repo>-preview-github`
++ `rg-<repo>-preview`, Step 3c)**, and — per the `github_repo` input — **keeps**,
 **archives** (read-only), or **deletes** the GitHub repo.
 
 ### Manually
