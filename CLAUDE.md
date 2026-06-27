@@ -85,18 +85,13 @@ Current grants:
   → subscription **Reader** + **Log Analytics Reader** — read-only estate
   visibility for the autonomous coding agent (still can't change Azure outside
   GitHub Actions).
-- `claude-runner-test` **broker** (`id-claude-runner-test`) → **Virtual Machine
-  User Login** (grants the HybridConnectivity relay access every `az ssh arc`
-  needs) + **Azure Connected Machine Resource Administrator** (Run Command),
-  scoped to the **`dockhost`** Azure Arc machine (rg-homelab) — lets the test
-  broker SSH-over-Arc into the homelab and run commands, for the experimental
-  homelab/Docker session backend. The broker is a managed identity, and Entra
-  SSH certs are issued only to interactive users, so it authenticates with an
-  **ephemeral local-user key** (regenerated each boot, pushed via Run Command,
-  never stored). Sandbox-only.
-- `claude-runner` **PROD broker** (`id-claude-runner`) → the same two roles on
-  the **`dockhost`** Arc machine — the production form of the test-broker grant
-  above, for the homelab session backend now promoted to prod.
+
+(The former `dockhost` Arc-machine grants for the `claude-runner` / `claude-runner-test`
+brokers — *Virtual Machine User Login* + *Azure Connected Machine Resource Administrator*,
+for the SSH-over-Arc `arc:dockhost` session backend — were **removed 2026-06-26**: that
+backend was retired in favour of the Arc-enabled k3s (`k8s`) backend, which authenticates
+to the cluster with its own Cluster-User grant + a ServiceAccount token, needing no
+machine-scoped access. The live assignments were deleted too.)
 
 ## Templates (GitHub template repositories)
 

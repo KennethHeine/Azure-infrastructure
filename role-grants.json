@@ -7,22 +7,6 @@
       "identityResourceGroup": "rg-claude-runner",
       "scope": "subscription",
       "roles": ["Reader", "Log Analytics Reader"]
-    },
-    {
-      "comment": "claude-runner-TEST broker: drive the experimental homelab (Azure Arc) session backend — open an SSH-over-Arc tunnel into the dockhost machine and run bootstrap/lifecycle commands. BOTH roles are needed: 'Virtual Machine User Login' grants the HybridConnectivity relay access (endpoints/listCredentials) that any 'az ssh arc' requires, and 'Azure Connected Machine Resource Administrator' grants Run Command (runCommands/*), which the broker uses to push its EPHEMERAL local-user SSH public key + drive Docker. The broker authenticates as a managed identity, and Azure issues Entra/AAD SSH certificates only to interactive users (not MIs) — so the broker uses a local-user key, regenerated each boot, never stored (the relay role's login dataAction goes unused). Scoped to the single dockhost resource in rg-homelab (cross-RG, so it cannot live in the test repo's own Bicep). Sandbox-only; remove if the homelab backend experiment is dropped. See claude-runner-test docs/homelab-arc-backend.md.",
-      "identityName": "id-claude-runner-test",
-      "identityResourceGroup": "rg-claude-runner-test",
-      "scope": "resource",
-      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-homelab/providers/Microsoft.HybridCompute/machines/dockhost",
-      "roles": ["Virtual Machine User Login", "Azure Connected Machine Resource Administrator"]
-    },
-    {
-      "comment": "claude-runner PROD broker: drive the homelab (Azure Arc) session backend — same as the claude-runner-test entry above but for the production broker. BOTH roles are needed: 'Virtual Machine User Login' grants the HybridConnectivity relay access (endpoints/listCredentials) every 'az ssh arc' requires, and 'Azure Connected Machine Resource Administrator' grants Run Command (runCommands/*), which the broker uses to push its EPHEMERAL local-user SSH public key + drive Docker. The broker is a managed identity, and Azure issues Entra/AAD SSH certificates only to interactive users (not MIs) — so it authenticates with a local-user key, regenerated each boot, never stored. Scoped to the single dockhost resource in rg-homelab (cross-RG, so it cannot live in the app repo's own Bicep). See claude-runner docs/homelab-arc-backend.md.",
-      "identityName": "id-claude-runner",
-      "identityResourceGroup": "rg-claude-runner",
-      "scope": "resource",
-      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-homelab/providers/Microsoft.HybridCompute/machines/dockhost",
-      "roles": ["Virtual Machine User Login", "Azure Connected Machine Resource Administrator"]
     }
   ]
 }
