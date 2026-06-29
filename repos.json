@@ -57,6 +57,7 @@
       "name": "tabt-arbejdsfortjeneste",
       "template": "container-app",
       "auth": true
-    }
+    },
+    "agent-research"
   ]
 }
