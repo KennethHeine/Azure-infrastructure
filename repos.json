@@ -58,6 +58,11 @@
       "template": "container-app",
       "auth": true
     },
-    "agent-research"
+    "agent-research",
+    {
+      "name": "claude-coder",
+      "template": "container-app",
+      "auth": true
+    }
   ]
 }
