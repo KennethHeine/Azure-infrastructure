@@ -4,8 +4,10 @@
 #   1. Owner role on subscription (to create RGs and assign roles to other SPs)
 #   2. Microsoft Graph Application.ReadWrite.All (to create app registrations, SPs, and federated credentials for other repos)
 #   3. Microsoft Graph AppRoleAssignment.ReadWrite.All (to grant each container-app
-#      repo's SP the Application.ReadWrite.OwnedBy role, so that repo can create its
-#      own Entra "Easy Auth" application at deploy time)
+#      repo's SP the Application.ReadWrite.OwnedBy role — so that repo can create its
+#      own Entra "Easy Auth" application at deploy time — and User.Read.All, so its
+#      deploy can resolve allowedUserEmails (UPN → object id) for the sign-in
+#      allow-list)
 #
 # Run this script ONCE manually with an account that has Global Administrator or
 # Privileged Role Administrator to grant admin consent for the Graph API permissions.
