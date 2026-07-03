@@ -204,14 +204,33 @@ the Container App's managed identity (federated credential — no client secret)
 
 For a repo's SP to create that app, it needs the Microsoft Graph
 **`Application.ReadWrite.OwnedBy`** permission. Onboarding grants it automatically
-(Step 5b of `create-repo-infrastructure.ps1`). That works because the central
-onboarding SP holds **`AppRoleAssignment.ReadWrite.All`** (granted by
-`setup-service-principal.ps1`), which lets it delegate app roles to repo SPs.
+(Step 5b of `create-repo-infrastructure.ps1`), alongside **`User.Read.All`** (see
+next paragraph). That works because the central onboarding SP holds
+**`AppRoleAssignment.ReadWrite.All`** (granted by `setup-service-principal.ps1`),
+which lets it delegate app roles to repo SPs.
 
 So the chain is: `setup-service-principal.ps1` → onboarding SP can grant app roles
 → onboarding grants each auth repo's SP `Application.ReadWrite.OwnedBy` → that repo's
 deploy creates its own Easy Auth app. The Easy Auth **token store is not enabled**
 (it requires a backing blob-storage SAS URL this template doesn't provision).
+
+**Access control (assignment required, default on).** Easy Auth is
+authentication *only* — by default **any tenant member OR invited guest** can pass
+the login wall, because it only checks that Entra will issue a token, not who the
+user is. So the template restricts sign-in with **`appRoleAssignmentRequired`** on
+the auth service principal plus an allow-list: `allowedPrincipalIds` (object ids,
+for groups) and **`allowedUserEmails`** (UPNs resolved to object ids at deploy via
+a `Microsoft.Graph/users existing` lookup — the human-readable way to say who gets
+in). The repo SP can set `appRoleAssignmentRequired` and assign users **to its own
+auth app** because it *owns* that app (a different permission from assigning roles
+on other apps' SPs). Resolving emails needs Graph **`User.Read.All`**, which
+Step 5b grants each auth repo SP too. Fail-safe: enforcement engages only when
+`restrictAccess && the allow-list is non-empty`, so an app can't deploy into a
+lock-out; the template's `main.parameters.json` ships locked to
+`kenneth@kscloud.io`, so **new apps are private by default** (set
+`restrictAccess:false` or empty the list to make one open). Assignments are
+created even before the toggle engages, so turning it on later is a safe second
+deploy, never a single risky one.
 
 ## Per-branch preview environments (opt-in)
 
