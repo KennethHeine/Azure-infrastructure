@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Estate-wide Microsoft Graph app-role (application permission) grants",
+  "description": "Application-permission (app-role) assignments granted to user-assigned managed identities, applied idempotently by scripts/apply-graph-grants.ps1 during onboarding. These are Entra DIRECTORY grants on a resource service principal (e.g. Microsoft Graph) — NOT Azure RBAC (that lives in role-grants.json). Only the onboarding SP can create them: it holds Microsoft Graph AppRoleAssignment.ReadWrite.All; a repo's own SP cannot. App-role ids come from the resource API's permission reference and are constant across tenants.",
+  "type": "object",
+  "required": ["grants"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "grants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["identityName", "identityResourceGroup", "appRoles"],
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "type": "string",
+            "description": "Why this grant exists — required reading for whoever reviews changes here."
+          },
+          "identityName": {
+            "type": "string",
+            "description": "Name of the user-assigned managed identity receiving the app roles. A managed identity's principalId IS its service principal object id."
+          },
+          "identityResourceGroup": {
+            "type": "string",
+            "description": "Resource group containing the identity."
+          },
+          "resourceAppId": {
+            "type": "string",
+            "description": "AppId of the resource service principal exposing the app roles. Defaults to Microsoft Graph (00000003-0000-0000-c000-000000000000).",
+            "default": "00000003-0000-0000-c000-000000000000"
+          },
+          "appRoles": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["name", "appRoleId"],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Human-readable permission name (e.g. Mail.Read) — documentation only; the appRoleId is authoritative."
+                },
+                "appRoleId": {
+                  "type": "string",
+                  "description": "The app role (application permission) GUID from the resource API's permission reference. Constant across tenants."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
