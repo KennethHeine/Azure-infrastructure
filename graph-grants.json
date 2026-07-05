@@ -1,0 +1,13 @@
+{
+  "$schema": "./graph-grants.schema.json",
+  "grants": [
+    {
+      "comment": "business assistant profile — read-only mailbox access for Kenneth's own email. The ask-first business profile runs on BOTH backends (cloud ACI + homelab k8s) as ONE unified session identity: id-claude-runner-session-business is attached to the ACI container group AND federated to the business k8s ServiceAccount (fc-k8s-business on sessionBusinessUami), so the same identity + RBAC serves both. (The former per-backend id-arck8s-business is RETIRED — dropped from k8sWiProfiles in claude-runner's infra/main.bicep, which is now just ['localsys']; an orphaned UAMI of that name may still linger since ARM incremental deploys don't delete removed loop resources, but nothing runs as it.) The session reads mail via the Microsoft Graph API app-only, using a token minted for this managed identity (no stored refresh token). Mail.Read is an APPLICATION permission = 'read mail in all mailboxes'; the tenant currently holds a single mailbox (Kenneth's), so no Exchange application access policy is scoped (his explicit call, 2026-07-05). If more mailboxes are ever added, add a Graph application access policy (https://learn.microsoft.com/graph/auth-limit-mailbox-access) restricting this app to a mail-enabled security group containing only the allowed mailbox — a policy change, not a code change here.",
+      "identityName": "id-claude-runner-session-business",
+      "identityResourceGroup": "rg-claude-runner",
+      "appRoles": [
+        { "name": "Mail.Read", "appRoleId": "810c84a8-4a9e-49e6-bf7d-12d183f40d01" }
+      ]
+    }
+  ]
+}

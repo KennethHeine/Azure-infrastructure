@@ -86,6 +86,22 @@ if (Test-Path $applyRoleGrants) {
     Write-Host ""
 }
 
+# ─── Ensure estate-wide Graph app-role grants (graph-grants.json) ────
+# Application-permission (app-role) grants to managed identities — e.g. the
+# business assistant's Mail.Read on Microsoft Graph. Only the onboarding SP can
+# create these (it holds Graph AppRoleAssignment.ReadWrite.All); a repo's own SP
+# cannot. Idempotent; identities whose repos haven't deployed yet are skipped
+# with a warning.
+$applyGraphGrants = Join-Path $scriptDir "apply-graph-grants.ps1"
+if (Test-Path $applyGraphGrants) {
+    & $applyGraphGrants
+    if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+        Write-Host "Error: Graph app-role grant application failed." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ""
+}
+
 if (-not (Test-Path $onboardScript)) {
     Write-Host "Error: Onboarding script not found: $onboardScript" -ForegroundColor Red
     exit 1

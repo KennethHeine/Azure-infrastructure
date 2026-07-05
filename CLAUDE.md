@@ -93,6 +93,32 @@ backend was retired in favour of the Arc-enabled k3s (`k8s`) backend, which auth
 to the cluster with its own Cluster-User grant + a ServiceAccount token, needing no
 machine-scoped access. The live assignments were deleted too.)
 
+## Config: `graph-grants.json`
+
+Estate-wide **Microsoft Graph app-role (application permission) grants** to
+managed identities — Entra *directory* grants on a resource service principal,
+**not** Azure RBAC (that's `role-grants.json`). Only the onboarding SP can create
+them: it holds Graph **AppRoleAssignment.ReadWrite.All**; a repo's own SP cannot.
+Declared here and applied by `scripts/apply-graph-grants.ps1`, which
+`process-repos.ps1` runs right after `apply-role-grants.ps1`. A managed identity's
+`principalId` is its service-principal object id, so each grant is POSTed to
+`/servicePrincipals/{principalId}/appRoleAssignments`. Idempotent; an identity
+whose repo hasn't deployed yet is a warning, not a failure (re-run **Onboard
+Repositories** afterwards). Schema: `graph-grants.schema.json`. App-role ids come
+from the resource API's permission reference and are constant across tenants
+(default resource is Microsoft Graph; override with `resourceAppId`).
+
+Current grants:
+- `claude-runner` **business assistant profile** → Microsoft Graph **Mail.Read**
+  (application) on its **unified session identity** `id-claude-runner-session-business`.
+  The business profile runs on both backends as ONE identity — attached to the ACI
+  container group *and* federated to the business k8s ServiceAccount (`fc-k8s-business`)
+  — so this single grant covers both. (The former per-backend `id-arck8s-business` is
+  retired; don't grant to it.) Read-only mailbox access for the ask-first business
+  assistant, app-only (no stored refresh token). The tenant has a single mailbox, so
+  no Exchange application access policy is scoped; add one (restricting the app to a
+  mail-enabled security group) if more mailboxes are ever added.
+
 ## Templates (GitHub template repositories)
 
 | Template | Repo | What you get |
