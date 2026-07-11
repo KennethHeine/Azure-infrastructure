@@ -62,7 +62,8 @@
     {
       "name": "claude-coder",
       "template": "container-app",
-      "auth": true
+      "auth": true,
+      "preview": true
     }
   ]
 }
