@@ -30,6 +30,16 @@
         "Reader",
         "Log Analytics Reader"
       ]
+    },
+    {
+      "comment": "claude-coder broker: read the estate's single GitHub App private key from the shared vault (rg-claude-runner) to mint installation tokens for coder-portal sessions \u2014 instead of copying the PEM into a second vault. Read-only (Secrets User).",
+      "identityName": "id-claude-coder",
+      "identityResourceGroup": "rg-claude-coder",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvclauderunneroqs3xhx7wy",
+      "roles": [
+        "Key Vault Secrets User"
+      ]
     }
   ]
 }
