@@ -20,6 +20,16 @@
       "roles": [
         "Azure Arc Enabled Kubernetes Cluster User Role"
       ]
+    },
+    {
+      "comment": "claude-coder sessions: read-only estate visibility (resource state + runtime logs), matching the claude-runner coder profile \u2014 the agent debugs deployed apps but cannot change Azure outside GitHub Actions. Same identity on both backends (IMDS on ACI, workload-identity federation on the homelab cluster).",
+      "identityName": "id-claude-coder-session",
+      "identityResourceGroup": "rg-claude-coder",
+      "scope": "subscription",
+      "roles": [
+        "Reader",
+        "Log Analytics Reader"
+      ]
     }
   ]
 }
