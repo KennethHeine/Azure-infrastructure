@@ -2,7 +2,7 @@
   "$schema": "./role-grants.schema.json",
   "grants": [
     {
-      "comment": "claude-runner coder sessions: read-only estate visibility (resource state + runtime logs) \u2014 the agent debugs deployed apps but cannot change Azure outside GitHub Actions.",
+      "comment": "claude-runner coder sessions: read-only estate visibility (resource state + runtime logs) — the agent debugs deployed apps but cannot change Azure outside GitHub Actions.",
       "identityName": "id-claude-runner-session-coder",
       "identityResourceGroup": "rg-claude-runner",
       "scope": "subscription",
@@ -12,7 +12,7 @@
       ]
     },
     {
-      "comment": "claude-coder broker: open Arc cluster-connect tunnels to the shared homelab k3s cluster (claude-k8s-preview lives in rg-claude-runner-preview \u2014 cross-RG, so the coder repo's SP cannot self-assign this). Data-plane auth stays a least-priv in-cluster SA token; this role only permits listClusterUserCredential for the proxy.",
+      "comment": "claude-coder broker: open Arc cluster-connect tunnels to the shared homelab k3s cluster (claude-k8s-preview lives in rg-claude-runner-preview — cross-RG, so the coder repo's SP cannot self-assign this). Data-plane auth stays a least-priv in-cluster SA token; this role only permits listClusterUserCredential for the proxy.",
       "identityName": "id-claude-coder",
       "identityResourceGroup": "rg-claude-coder",
       "scope": "resource",
@@ -22,7 +22,7 @@
       ]
     },
     {
-      "comment": "claude-coder sessions: read-only estate visibility (resource state + runtime logs), matching the claude-runner coder profile \u2014 the agent debugs deployed apps but cannot change Azure outside GitHub Actions. Same identity on both backends (IMDS on ACI, workload-identity federation on the homelab cluster).",
+      "comment": "claude-coder sessions: read-only estate visibility (resource state + runtime logs), matching the claude-runner coder profile — the agent debugs deployed apps but cannot change Azure outside GitHub Actions. Same identity on both backends (IMDS on ACI, workload-identity federation on the homelab cluster).",
       "identityName": "id-claude-coder-session",
       "identityResourceGroup": "rg-claude-coder",
       "scope": "subscription",
@@ -32,13 +32,63 @@
       ]
     },
     {
-      "comment": "claude-coder broker: read the estate's single GitHub App private key from the shared vault (rg-claude-runner) to mint installation tokens for coder-portal sessions \u2014 instead of copying the PEM into a second vault. Read-only (Secrets User).",
+      "comment": "claude-coder broker: read the estate's single GitHub App private key from the shared vault (rg-claude-runner) to mint installation tokens for coder-portal sessions — instead of copying the PEM into a second vault. Read-only (Secrets User).",
       "identityName": "id-claude-coder",
       "identityResourceGroup": "rg-claude-coder",
       "scope": "resource",
       "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvclauderunneroqs3xhx7wy",
       "roles": [
         "Key Vault Secrets User"
+      ]
+    },
+    {
+      "comment": "claude-coder coder profile: read/write on the estate's coder vault (kv-coder) — the same $PROFILE_KEYVAULT the claude-runner coder profile uses, so both platforms share one per-profile secret store. Cross-RG, so the coder repo's SP cannot self-assign this.",
+      "identityName": "id-claude-coder-session",
+      "identityResourceGroup": "rg-claude-coder",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvcodery5xobnztkjfve",
+      "roles": [
+        "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "claude-coder cloud-sysadmin profile: read/write on the estate's cloud-sysadmin vault. Ask-first profile; the vault is its only writable secret store.",
+      "identityName": "id-claude-coder-session-syscloud",
+      "identityResourceGroup": "rg-claude-coder",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvcloudsysy27twnnxttwew",
+      "roles": [
+        "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "claude-coder local-sysadmin profile: read/write on the estate's local-sysadmin vault (ha-api-token, unifi-api-key live here). Homelab-only profile; staged until the per-profile k8s namespaces exist, but the grant is safe to land with the identity.",
+      "identityName": "id-claude-coder-session-localsys",
+      "identityResourceGroup": "rg-claude-coder",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvlocalsyscxkhyp34tmi3a",
+      "roles": [
+        "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "claude-coder personal assistant profile: read/write on the estate's personal vault (banking/API credentials seeded by Kenneth). Same one-vault-per-profile boundary as claude-runner's personal profile.",
+      "identityName": "id-claude-coder-session-personal",
+      "identityResourceGroup": "rg-claude-coder",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvpersonal6iprsx4sx5e74",
+      "roles": [
+        "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "claude-coder business assistant profile: read/write on the estate's business vault. Deliberately NO shared-vault read and NO GitHub token access (enforced broker-side in claude-coder); Graph Mail.Read is a separate decision for Kenneth (graph-grants.json), not included here.",
+      "identityName": "id-claude-coder-session-business",
+      "identityResourceGroup": "rg-claude-coder",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvbusinesscsz6ug3tg4cb4",
+      "roles": [
+        "Key Vault Secrets Officer"
       ]
     }
   ]
