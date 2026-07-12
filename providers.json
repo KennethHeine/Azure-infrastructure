@@ -10,6 +10,7 @@
     "Microsoft.Web",
     "Microsoft.Network",
     "Microsoft.Insights",
-    "Microsoft.RecoveryServices"
+    "Microsoft.RecoveryServices",
+    "Microsoft.CognitiveServices"
   ]
 }
