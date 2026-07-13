@@ -6,7 +6,21 @@
       "identityName": "id-claude-runner-session-business",
       "identityResourceGroup": "rg-claude-runner",
       "appRoles": [
-        { "name": "Mail.Read", "appRoleId": "810c84a8-4a9e-49e6-bf7d-12d183f40d01" }
+        {
+          "name": "Mail.Read",
+          "appRoleId": "810c84a8-4a9e-49e6-bf7d-12d183f40d01"
+        }
+      ]
+    },
+    {
+      "comment": "claude-coder business assistant profile — app-only read-only mailbox access for mail triage, mirroring the claude-runner business profile grant (one unified identity across both backends: ACI attach + fc-k8s-business workload-identity federation on id-claude-coder-session-business). Kenneth approved 2026-07-13.",
+      "identityName": "id-claude-coder-session-business",
+      "identityResourceGroup": "rg-claude-coder",
+      "appRoles": [
+        {
+          "name": "Mail.Read",
+          "appRoleId": "810c84a8-4a9e-49e6-bf7d-12d183f40d01"
+        }
       ]
     }
   ]
