@@ -496,11 +496,36 @@ if (-not $ghToken) {
         # `az ad app federated-credential create` rejects claimsMatchingExpression,
         # so create it via `az rest` against beta using the app OBJECT id.
         $ficName = "github-actions-branches"
-        $existingFic = az ad app federated-credential list --id $previewAppId --query "[?name=='$ficName'].name" --output tsv --only-show-errors
-        if ($existingFic) {
-            Write-Host "  Federated credential '$ficName' already exists" -ForegroundColor Yellow
+        $expectedFicExpr = "claims['sub'] matches 'repo:$GitHubOrg/${GitHubRepo}:ref:refs/heads/*'"
+        $previewObjId = az ad app show --id $previewAppId --query id --output tsv --only-show-errors
+        # Check the FIC by CONTENT, not just name: a credential created by a
+        # pre-flexible version of this script name-matches but carries an exact
+        # subject Entra never wildcards — branch deploys then fail AADSTS700213
+        # forever (bit claude-coder, 2026-07-14). Stale ⇒ delete + recreate.
+        $existingFicId = $null
+        $existingFicExpr = $null
+        if ($previewObjId) {
+            $ficListJson = az rest --method GET `
+                --url "https://graph.microsoft.com/beta/applications/$previewObjId/federatedIdentityCredentials" `
+                --only-show-errors 2>$null
+            if ($LASTEXITCODE -eq 0 -and $ficListJson) {
+                $fic = ($ficListJson | ConvertFrom-Json).value | Where-Object { $_.name -eq $ficName } | Select-Object -First 1
+                if ($fic) {
+                    $existingFicId = $fic.id
+                    $existingFicExpr = $fic.claimsMatchingExpression.value
+                }
+            }
+            $global:LASTEXITCODE = 0
+        }
+        if ($existingFicExpr -eq $expectedFicExpr) {
+            Write-Host "  Federated credential '$ficName' already correct (wildcard)" -ForegroundColor Yellow
         } else {
-            $previewObjId = az ad app show --id $previewAppId --query id --output tsv --only-show-errors
+            if ($existingFicId) {
+                az rest --method DELETE `
+                    --url "https://graph.microsoft.com/beta/applications/$previewObjId/federatedIdentityCredentials/$existingFicId" `
+                    --only-show-errors 2>&1 | Out-Null
+                Write-Host "  Removed stale federated credential '$ficName' (expression was: '$existingFicExpr')" -ForegroundColor Yellow
+            }
             $ficBody = [ordered]@{
                 name      = $ficName
                 issuer    = "https://token.actions.githubusercontent.com"
