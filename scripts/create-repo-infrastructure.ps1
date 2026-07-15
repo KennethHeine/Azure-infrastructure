@@ -230,10 +230,19 @@ function Add-FederatedCredential {
         [string]$Description
     )
 
-    $existing = az ad app federated-credential list --id $AppId --query "[?name=='$Name'].name" --output tsv --only-show-errors
-    if ($existing) {
-        Write-Host "  Federated credential '$Name' already exists" -ForegroundColor Yellow
+    # Compare by CONTENT, not just name: GitHub's OIDC sub format can change
+    # (repos created on/after 2026-07-15 present immutable ID-annotated
+    # subjects — repo:OWNER@OWNER-ID/REPO@REPO-ID:...), and a name-match with
+    # a stale subject fails AADSTS700213 forever. Stale ⇒ delete + recreate.
+    $existingSubject = az ad app federated-credential list --id $AppId --query "[?name=='$Name'].subject | [0]" --output tsv --only-show-errors
+    if ($existingSubject -eq $Subject) {
+        Write-Host "  Federated credential '$Name' already correct" -ForegroundColor Yellow
         return
+    }
+    if ($existingSubject) {
+        az ad app federated-credential delete --id $AppId --federated-credential-id $Name --only-show-errors 2>&1 | Out-Null
+        Write-Host "  Removed stale federated credential '$Name' (subject was: '$existingSubject')" -ForegroundColor Yellow
+        $global:LASTEXITCODE = 0
     }
 
     $credJson = @"
@@ -265,19 +274,13 @@ function Add-FederatedCredential {
     $global:LASTEXITCODE = 0
 }
 
-# Federated credential for main branch
-Add-FederatedCredential `
-    -AppId $appId `
-    -Name "github-actions-main" `
-    -Subject "repo:$GitHubOrg/${GitHubRepo}:ref:refs/heads/main" `
-    -Description "GitHub Actions - main branch"
-
-# Federated credential for pull requests
-Add-FederatedCredential `
-    -AppId $appId `
-    -Name "github-actions-pr" `
-    -Subject "repo:$GitHubOrg/${GitHubRepo}:pull_request" `
-    -Description "GitHub Actions - pull requests"
+# NOTE: the prod FICs are created in Step 6b — AFTER the GitHub repo exists —
+# because their subjects must come from the repo's LIVE OIDC sub-claim prefix.
+# Repos created on/after 2026-07-15 embed immutable owner/repo IDs in the
+# default subject (repo:OWNER@ID/REPO@ID:...); building the subject from names
+# here broke the first deploy of every new repo (AADSTS700213, hit by 'agent'
+# on 2026-07-15, GitHub's rollout day).
+$subClaimPrefix = "repo:$GitHubOrg/$GitHubRepo"   # fallback; Step 6b overrides from the API
 
 Write-Host ""
 
@@ -389,6 +392,35 @@ if (-not $ghToken) {
     }
     Write-Host ""
 
+    # ─── Step 6b: Federated credentials (subjects from the live sub prefix) ──
+    # The repo's actual OIDC subject prefix is only knowable from the repo
+    # itself (immutable ID-annotated for repos created on/after 2026-07-15,
+    # legacy repo:OWNER/REPO before that) — so the FICs are created here, after
+    # the repo exists, not in Step 5. Add-FederatedCredential reconciles by
+    # content, so re-running onboarding heals FICs created with a stale format.
+    Write-Host "Step 6b: Creating federated credentials..." -ForegroundColor Cyan
+    $livePrefix = gh api "repos/$repoFullName/actions/oidc/customization/sub" --jq '.sub_claim_prefix' 2>$null
+    if ($LASTEXITCODE -eq 0 -and $livePrefix) {
+        $subClaimPrefix = $livePrefix
+    } else {
+        Write-Host "  WARNING: could not read the repo's sub-claim prefix; using fallback '$subClaimPrefix'" -ForegroundColor Yellow
+    }
+    $global:LASTEXITCODE = 0
+    Write-Host "  OIDC sub prefix: $subClaimPrefix" -ForegroundColor Gray
+
+    Add-FederatedCredential `
+        -AppId $appId `
+        -Name "github-actions-main" `
+        -Subject "${subClaimPrefix}:ref:refs/heads/main" `
+        -Description "GitHub Actions - main branch"
+
+    Add-FederatedCredential `
+        -AppId $appId `
+        -Name "github-actions-pr" `
+        -Subject "${subClaimPrefix}:pull_request" `
+        -Description "GitHub Actions - pull requests"
+    Write-Host ""
+
     # ─── Step 7: Repo merge settings ─────────────────────────────────
     # delete_branch_on_merge: keep the repo free of merged branches.
     # allow_auto_merge: lets workflows use `gh pr merge --auto` (e.g. the
@@ -496,7 +528,7 @@ if (-not $ghToken) {
         # `az ad app federated-credential create` rejects claimsMatchingExpression,
         # so create it via `az rest` against beta using the app OBJECT id.
         $ficName = "github-actions-branches"
-        $expectedFicExpr = "claims['sub'] matches 'repo:$GitHubOrg/${GitHubRepo}:ref:refs/heads/*'"
+        $expectedFicExpr = "claims['sub'] matches '${subClaimPrefix}:ref:refs/heads/*'"
         $previewObjId = az ad app show --id $previewAppId --query id --output tsv --only-show-errors
         # Check the FIC by CONTENT, not just name: a credential created by a
         # pre-flexible version of this script name-matches but carries an exact
@@ -531,7 +563,7 @@ if (-not $ghToken) {
                 issuer    = "https://token.actions.githubusercontent.com"
                 audiences = @("api://AzureADTokenExchange")
                 claimsMatchingExpression = [ordered]@{
-                    value           = "claims['sub'] matches 'repo:$GitHubOrg/${GitHubRepo}:ref:refs/heads/*'"
+                    value           = $expectedFicExpr
                     languageVersion = 1
                 }
             } | ConvertTo-Json -Depth 5 -Compress
