@@ -90,6 +90,96 @@
       "roles": [
         "Key Vault Secrets Officer"
       ]
+    },
+    {
+      "comment": "agent broker (claude-coder's successor platform, Kenneth's ask 2026-07-15): open Arc cluster-connect tunnels to the shared homelab k3s cluster — mirrors the id-claude-coder grant above. The claude-coder entries stay until rg-claude-coder is decommissioned after the parallel-run period.",
+      "identityName": "id-agent",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner-preview/providers/Microsoft.Kubernetes/connectedClusters/claude-k8s-preview",
+      "roles": [
+        "Azure Arc Enabled Kubernetes Cluster User Role"
+      ]
+    },
+    {
+      "comment": "agent broker: read the estate's single GitHub App private key from the shared vault (rg-claude-runner) to mint installation tokens for sessions — mirrors the id-claude-coder grant. Read-only (Secrets User).",
+      "identityName": "id-agent",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvclauderunneroqs3xhx7wy",
+      "roles": [
+        "Key Vault Secrets User"
+      ]
+    },
+    {
+      "comment": "agent sessions (coder profile): read-only estate visibility (resource state + runtime logs), matching the claude-runner and claude-coder coder profiles. Same identity on both backends (IMDS on ACI, workload-identity federation on the homelab cluster).",
+      "identityName": "id-agent-session",
+      "identityResourceGroup": "rg-agent",
+      "scope": "subscription",
+      "roles": [
+        "Reader",
+        "Log Analytics Reader"
+      ]
+    },
+    {
+      "comment": "agent coder profile: read/write on the estate's shared coder vault (kv-coder) — the same $PROFILE_KEYVAULT the claude-runner and claude-coder coder profiles use.",
+      "identityName": "id-agent-session",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvcodery5xobnztkjfve",
+      "roles": [
+        "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "agent cloud-sysadmin profile: read/write on the estate's cloud-sysadmin vault — mirrors the claude-coder syscloud grant.",
+      "identityName": "id-agent-session-syscloud",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvcloudsysy27twnnxttwew",
+      "roles": [
+        "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "agent local-sysadmin profile: read/write on the estate's local-sysadmin vault (ha-api-token, unifi-api-key) — mirrors the claude-coder localsys grant; staged until the agent-profile-* k8s namespaces exist, safe to land with the identity.",
+      "identityName": "id-agent-session-localsys",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvlocalsyscxkhyp34tmi3a",
+      "roles": [
+        "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "agent personal assistant profile: read/write on the estate's personal vault — mirrors the claude-coder personal grant.",
+      "identityName": "id-agent-session-personal",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvpersonal6iprsx4sx5e74",
+      "roles": [
+        "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "agent business assistant profile: read/write on the estate's business vault — mirrors the claude-coder business grant (deliberately NO shared-vault read and NO GitHub token access; Graph Mail.Read lives in graph-grants.json).",
+      "identityName": "id-agent-session-business",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvbusinesscsz6ug3tg4cb4",
+      "roles": [
+        "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "TEMPORARY (claude-coder → agent state migration, 2026-07-15): let the coder session identity read the old platform's storage account key so it can copy Table Storage (sessions/routines/transcripts) + Files shares (codex-home/claude-home logins) into rg-agent's account. REMOVE this entry (and the live assignment) once the migration is verified — tracked in the agent cutover plan.",
+      "identityName": "id-claude-runner-session-coder",
+      "identityResourceGroup": "rg-claude-runner",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-coder/providers/Microsoft.Storage/storageAccounts/stclaudecoderdoohqzjs5dr",
+      "roles": [
+        "Storage Account Key Operator Service Role"
+      ]
     }
   ]
 }
