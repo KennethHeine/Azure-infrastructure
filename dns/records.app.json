@@ -154,14 +154,6 @@
       ]
     },
     {
-      "type": "CNAME",
-      "name": "coder",
-      "ttl": 3600,
-      "values": [
-        "ca-claude-coder.bluewave-03e7123c.swedencentral.azurecontainerapps.io"
-      ]
-    },
-    {
       "type": "TXT",
       "name": "asuid.coder",
       "ttl": 3600,
