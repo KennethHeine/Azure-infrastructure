@@ -180,6 +180,16 @@
       "roles": [
         "Storage Account Key Operator Service Role"
       ]
+    },
+    {
+      "comment": "TEMPORARY (claude-coder → agent state migration, 2026-07-15): the WRITE side of the one-time copy — key access on the NEW platform's storage account (rg-agent), pairing the read-side grant above. REMOVE both entries (and the live assignments) once the migration is verified — tracked in the agent cutover plan.",
+      "identityName": "id-claude-runner-session-coder",
+      "identityResourceGroup": "rg-claude-runner",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-agent/providers/Microsoft.Storage/storageAccounts/stagentntgpdmw7iwdag",
+      "roles": [
+        "Storage Account Key Operator Service Role"
+      ]
     }
   ]
 }
