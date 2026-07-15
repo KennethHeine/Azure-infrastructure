@@ -22,6 +22,17 @@
           "appRoleId": "810c84a8-4a9e-49e6-bf7d-12d183f40d01"
         }
       ]
+    },
+    {
+      "comment": "agent (claude-coder's successor platform, Kenneth's ask 2026-07-15) business assistant profile — same app-only read-only mailbox grant as the claude-coder entry above, on the new platform's unified business session identity (ACI attach + fc-k8s-business workload-identity federation on id-agent-session-business). The claude-coder entry stays until rg-claude-coder is decommissioned after the parallel-run period.",
+      "identityName": "id-agent-session-business",
+      "identityResourceGroup": "rg-agent",
+      "appRoles": [
+        {
+          "name": "Mail.Read",
+          "appRoleId": "810c84a8-4a9e-49e6-bf7d-12d183f40d01"
+        }
+      ]
     }
   ]
 }
