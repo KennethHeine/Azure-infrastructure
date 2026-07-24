@@ -190,6 +190,16 @@
       "roles": [
         "Storage Account Key Operator Service Role"
       ]
+    },
+    {
+      "comment": "TEMPORARY (claude-runner → agent KB migration, 2026-07-24): read the claude-runner platform's Files shares over AAD (no keys) so the coder session can copy Kenneth's knowledge base (kb-business/kb-personal) onto the agent platform's storage account. Privileged READER only — the write side already exists as the key-operator grant on stagent below. REMOVE this entry and its live assignment once the copy is verified; it is scoped to one storage account and grants no control-plane rights.",
+      "identityName": "id-claude-runner-session-coder",
+      "identityResourceGroup": "rg-claude-runner",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.Storage/storageAccounts/stclauderunneroqs3xhx7wy",
+      "roles": [
+        "Storage File Data Privileged Reader"
+      ]
     }
   ]
 }
