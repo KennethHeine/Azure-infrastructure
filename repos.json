@@ -70,6 +70,7 @@
       "template": "container-app",
       "auth": true,
       "preview": true
-    }
+    },
+    "trading-lab"
   ]
 }
