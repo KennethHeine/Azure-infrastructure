@@ -60,12 +60,6 @@
     },
     "agent-research",
     {
-      "name": "claude-coder",
-      "template": "container-app",
-      "auth": true,
-      "preview": true
-    },
-    {
       "name": "agent",
       "template": "container-app",
       "auth": true,
