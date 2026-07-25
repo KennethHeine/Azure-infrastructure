@@ -52,16 +52,6 @@
       ]
     },
     {
-      "comment": "agent cloud-sysadmin profile: read/write on the estate's cloud-sysadmin vault — mirrors the claude-coder syscloud grant.",
-      "identityName": "id-agent-session-syscloud",
-      "identityResourceGroup": "rg-agent",
-      "scope": "resource",
-      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvcloudsysy27twnnxttwew",
-      "roles": [
-        "Key Vault Secrets Officer"
-      ]
-    },
-    {
       "comment": "agent local-sysadmin profile: read/write on the estate's local-sysadmin vault (ha-api-token, unifi-api-key) — mirrors the claude-coder localsys grant; staged until the agent-profile-* k8s namespaces exist, safe to land with the identity.",
       "identityName": "id-agent-session-localsys",
       "identityResourceGroup": "rg-agent",
@@ -89,6 +79,15 @@
       "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner/providers/Microsoft.KeyVault/vaults/kvbusinesscsz6ug3tg4cb4",
       "roles": [
         "Key Vault Secrets Officer"
+      ]
+    },
+    {
+      "comment": "agent coder profile: cost visibility, folded in when the cloud-sysadmin profile was retired (2026-07-25). Read-only — 'what is the estate costing' without a second profile. Every Azure CHANGE still goes through Bicep + Actions.",
+      "identityName": "id-agent-session",
+      "identityResourceGroup": "rg-agent",
+      "scope": "subscription",
+      "roles": [
+        "Cost Management Reader"
       ]
     }
   ]

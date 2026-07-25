@@ -22,6 +22,17 @@
           "appRoleId": "810c84a8-4a9e-49e6-bf7d-12d183f40d01"
         }
       ]
+    },
+    {
+      "comment": "agent coder profile: Entra DIRECTORY READ, folded in when cloud-sysadmin was retired (2026-07-25). Read-only application permission — it lets estate work resolve principals and inspect app registrations / service principals; without it `az role assignment list` prints 'Failed to query by invoking Graph API' and shows raw object ids. NO write permission: app registrations, role assignments and RBAC changes stay in the control plane (role-grants.json / Bicep / Actions), which is the estate's hard rule.",
+      "identityName": "id-agent-session",
+      "identityResourceGroup": "rg-agent",
+      "appRoles": [
+        {
+          "name": "Directory.Read.All",
+          "appRoleId": "7ab1d382-f21e-4acd-a863-ba3e13f7da61"
+        }
+      ]
     }
   ]
 }
