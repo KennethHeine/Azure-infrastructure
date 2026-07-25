@@ -144,15 +144,78 @@ if ($appId) {
 $global:LASTEXITCODE = 0
 Write-Host ""
 
+# ─── Step 2b: Release Azure Backup before the RG can be deleted ──────
+# A Recovery Services vault protecting a storage account auto-creates an
+# `AzureBackupProtectionLock` (CanNotDelete) ON THE STORAGE ACCOUNT. That lock
+# makes `az group delete` fail with no useful message — which is exactly how the
+# claude-coder decommission failed on 2026-07-25. Any repo whose shares are
+# backed up (see the Azure Files backup work) hits this.
+#
+# Order matters: soft delete must be turned OFF first, otherwise disabling
+# protection leaves the items in a soft-deleted state for 14 days and the vault
+# (and therefore the RG) still refuses to go.
+Write-Host "Step 2b: Releasing Azure Backup protection in '$ResourceGroupName'..." -ForegroundColor Cyan
+$vaults = @()
+if ((az group exists --name $ResourceGroupName --only-show-errors) -eq "true") {
+    $vaults = @(az backup vault list -g $ResourceGroupName --query "[].name" -o tsv --only-show-errors 2>$null)
+}
+if (-not $vaults -or $vaults.Count -eq 0) {
+    Write-Host "  No Recovery Services vault — nothing to release" -ForegroundColor Yellow
+} else {
+    foreach ($vault in $vaults) {
+        Write-Host "  Vault '$vault':" -ForegroundColor Cyan
+        # 1. Disable soft delete so 'delete backup data' is immediate.
+        az backup vault backup-properties set --name $vault -g $ResourceGroupName `
+            --soft-delete-feature-state Disable --only-show-errors 2>&1 | Out-Null
+        $global:LASTEXITCODE = 0
+        # 2. Stop protection + delete the backup data for every protected item.
+        $items = az backup item list --vault-name $vault -g $ResourceGroupName `
+            --query "[].{name:name,container:properties.containerName,type:properties.backupManagementType,friendly:properties.friendlyName}" `
+            -o json --only-show-errors 2>$null | ConvertFrom-Json
+        foreach ($item in @($items)) {
+            Write-Host "    disabling protection for '$($item.friendly)'" -ForegroundColor Cyan
+            az backup protection disable --vault-name $vault -g $ResourceGroupName `
+                --container-name $item.container --item-name $item.name `
+                --backup-management-type $item.type --delete-backup-data true --yes `
+                --only-show-errors 2>&1 | Out-Null
+            $global:LASTEXITCODE = 0
+        }
+        # 3. Unregister the containers so the protection lock is released.
+        $containers = az backup container list --vault-name $vault -g $ResourceGroupName `
+            --backup-management-type AzureStorage --query "[].name" -o tsv --only-show-errors 2>$null
+        foreach ($container in @($containers)) {
+            az backup container unregister --vault-name $vault -g $ResourceGroupName `
+                --container-name $container --backup-management-type AzureStorage --yes `
+                --only-show-errors 2>&1 | Out-Null
+            $global:LASTEXITCODE = 0
+        }
+    }
+    # 4. Belt and braces: drop any AzureBackupProtectionLock still standing.
+    $locks = az lock list -g $ResourceGroupName --query "[?name=='AzureBackupProtectionLock'].id" -o tsv --only-show-errors 2>$null
+    foreach ($lock in @($locks)) {
+        if ($lock) {
+            az lock delete --ids $lock --only-show-errors 2>&1 | Out-Null
+            Write-Host "    removed AzureBackupProtectionLock" -ForegroundColor Green
+            $global:LASTEXITCODE = 0
+        }
+    }
+    Write-Host "  Backup protection released" -ForegroundColor Green
+}
+$global:LASTEXITCODE = 0
+Write-Host ""
+
 # ─── Step 3: Delete the resource group (incl. the repo's own ACR) ────
 Write-Host "Step 3: Deleting resource group '$ResourceGroupName'..." -ForegroundColor Cyan
 $rgExists = az group exists --name $ResourceGroupName --only-show-errors
 if ($rgExists -eq "true") {
-    az group delete --name $ResourceGroupName --yes --only-show-errors 2>&1 | Out-Null
+    $deleteOutput = az group delete --name $ResourceGroupName --yes --only-show-errors 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  Deleted resource group '$ResourceGroupName'" -ForegroundColor Green
     } else {
+        # Print the reason — a swallowed error here cost a debugging round.
         Write-Host "Error: Failed to delete resource group '$ResourceGroupName'" -ForegroundColor Red
+        Write-Host ($deleteOutput | Out-String) -ForegroundColor Red
+        Write-Host "  Check for resource locks: az lock list -g $ResourceGroupName" -ForegroundColor Yellow
         exit 1
     }
 } else {
