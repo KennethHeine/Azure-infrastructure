@@ -39,7 +39,7 @@
               "auth": {
                 "type": "boolean",
                 "default": true,
-                "description": "container-app only: enable Entra built-in auth (Easy Auth). Default true."
+                "description": "Grant the repo's deploy SP the Graph app roles for declarative Entra Easy Auth (Application.ReadWrite.OwnedBy + User.Read.All), so its own Bicep can create the auth app. container-app repos also scaffold Easy Auth in their template. Default: true for container-app, false for other templates — a template-none repo that builds its own infra (e.g. trading-lab) opts in explicitly."
               },
               "preview": {
                 "type": "boolean",
