@@ -297,7 +297,12 @@ Write-Host ""
 #     grant is harmless and uniform, so it's applied to every auth repo.
 # The central onboarding SP holds AppRoleAssignment.ReadWrite.All (see
 # setup-service-principal.ps1), so it can grant these app roles here. Idempotent.
-if ($Template -eq "container-app" -and $EnableAuth) {
+# Any repo with auth enabled - not only container-app ones. A template-none
+# repo that builds its own infra (trading-lab) creates its Easy Auth app the
+# same declarative way and needs the same two roles. process-repos.ps1 keeps
+# auth OFF by default for non-container-app entries, so this fires only on an
+# explicit opt-in in repos.json.
+if ($EnableAuth) {
     Write-Host "Step 5b: Granting Graph app roles to the SP (Entra auth + email resolution)..." -ForegroundColor Cyan
 
     $graphAppId = "00000003-0000-0000-c000-000000000000"
