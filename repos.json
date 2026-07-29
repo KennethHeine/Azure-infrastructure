@@ -65,6 +65,10 @@
       "auth": true,
       "preview": true
     },
-    "trading-lab"
+    {
+      "name": "trading-lab",
+      "template": "none",
+      "auth": true
+    }
   ]
 }
