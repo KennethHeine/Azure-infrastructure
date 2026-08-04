@@ -430,7 +430,7 @@ URL, validates, writes the secret, optionally re-runs onboarding).
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `onboard-repos.yml` | push to `repos.json` on main, manual | Provision/refresh all repos |
+| `onboard-repos.yml` | push to `repos.json`, `role-grants.json` or `graph-grants.json` on main, manual | Provision/refresh all repos; apply estate-wide RBAC + Graph grants |
 | `add-repo.yml` | manual (inputs) | Add an entry to repos.json → triggers onboarding |
 | `decommission-repo.yml` | manual (inputs + confirm) | Full teardown of one repo |
 | `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone (creates `rg-dns`); applies the union of `dns/records.platform.json` + `dns/records.app.json` then prunes stale records |

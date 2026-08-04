@@ -4,10 +4,19 @@ on:
   # Manual trigger from GitHub UI
   workflow_dispatch:
 
-  # Auto-trigger when repos.json changes on main
+  # Auto-trigger when any config process-repos.ps1 reconciles changes on main.
+  # All three are inert declarations until this workflow applies them as the
+  # onboarding SP — the only principal that can assign subscription-scope roles
+  # and Graph app-roles — so a merge that isn't listed here silently does
+  # nothing until someone remembers to dispatch it by hand.
   push:
     branches: [main]
-    paths: [repos.json]
+    paths:
+      - repos.json         # → create-repo-infrastructure.ps1
+      - role-grants.json   # → apply-role-grants.ps1
+      - graph-grants.json  # → apply-graph-grants.ps1
+      # NOTE: providers.json (→ register-providers.ps1) has the same gap and is
+      # deliberately NOT listed here — see the PR discussion; add it if wanted.
 
 permissions:
   id-token: write   # Required for OIDC federated credential
