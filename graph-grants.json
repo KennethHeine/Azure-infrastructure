@@ -33,6 +33,17 @@
           "appRoleId": "7ab1d382-f21e-4acd-a863-ba3e13f7da61"
         }
       ]
+    },
+    {
+      "comment": "agent local-sysadmin profile: Entra DIRECTORY READ, the same grant the coder profile received when cloud-sysadmin was retired (2026-07-25) — added 2026-08-04 as local-sysadmin absorbs that role and becomes sysadmin for cloud AND local. Read-only application permission: it lets estate work resolve principals and inspect app registrations / service principals; without it `az role assignment list` prints 'Failed to query by invoking Graph API' and shows raw object ids. NO write permission: app registrations, role assignments and RBAC changes stay in the control plane (role-grants.json / Bicep / Actions). Note this is DIRECTORY-WIDE read across the tenant, which is broader than the Azure RBAC grants in role-grants.json. appRoleId copied verbatim from the coder entry above (a successfully applied grant) — it could not be verified against live Graph from a session, precisely because this read is what's missing.",
+      "identityName": "id-agent-session-localsys",
+      "identityResourceGroup": "rg-agent",
+      "appRoles": [
+        {
+          "name": "Directory.Read.All",
+          "appRoleId": "7ab1d382-f21e-4acd-a863-ba3e13f7da61"
+        }
+      ]
     }
   ]
 }
