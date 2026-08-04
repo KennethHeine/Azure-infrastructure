@@ -85,6 +85,23 @@ Current grants:
   → subscription **Reader** + **Log Analytics Reader** — read-only estate
   visibility for the autonomous coding agent (still can't change Azure outside
   GitHub Actions).
+- `agent` **broker** (`id-agent`) → *Azure Arc Enabled Kubernetes Cluster User
+  Role* on the shared homelab cluster `claude-k8s-preview`. **Load-bearing:**
+  this is the agent platform's homelab session backend, and the cluster lives in
+  `rg-claude-runner-preview` because a k8s cluster can be Arc-connected only
+  once. Do not remove it, and do not delete that connectedCluster — there is no
+  RG-move for `Microsoft.Kubernetes/connectedClusters`, and re-onboarding mints a
+  NEW OIDC issuer URL that invalidates every federated credential.
+- `agent` **session identity** (`id-agent-session`) → subscription **Reader** +
+  **Log Analytics Reader**, plus **Cost Management Reader**.
+
+(The five `agent` **Key Vault** grants into `rg-claude-runner` — `id-agent` on the
+shared `github-app-private-key` vault and the four per-profile `Secrets Officer`
+grants — were **removed 2026-08-04**: agent now owns its own per-profile vaults in
+`rg-agent`, declared in its own Bicep next to the identities that receive them, so
+these cross-RG grants are dead. Note `apply-role-grants.ps1` is additive only, so
+removing an entry stops it being re-granted but does **not** revoke the live
+assignment — delete those separately, or let them die with the old vaults.)
 
 (The former `dockhost` Arc-machine grants for the `claude-runner` / `claude-runner-test`
 brokers — *Virtual Machine User Login* + *Azure Connected Machine Resource Administrator*,
