@@ -39,6 +39,17 @@
       "roles": [
         "Cost Management Reader"
       ]
+    },
+    {
+      "comment": "agent local-sysadmin profile: full read-only estate visibility — resource state, runtime logs and cost. Kenneth's ask 2026-08-04: the local-sysadmin profile absorbs the retired cloud-sysadmin role and becomes sysadmin for cloud AND local, so it gets the same read set the coder profile holds (the two grants above). Read-only — every Azure CHANGE still goes through Bicep + Actions. The matching Entra directory read is in graph-grants.json.",
+      "identityName": "id-agent-session-localsys",
+      "identityResourceGroup": "rg-agent",
+      "scope": "subscription",
+      "roles": [
+        "Reader",
+        "Log Analytics Reader",
+        "Cost Management Reader"
+      ]
     }
   ]
 }
