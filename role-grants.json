@@ -12,11 +12,11 @@
       ]
     },
     {
-      "comment": "agent broker (claude-coder's successor platform, Kenneth's ask 2026-07-15): open Arc cluster-connect tunnels to the shared homelab k3s cluster — mirrors the id-claude-coder grant above. The claude-coder entries stay until rg-claude-coder is decommissioned after the parallel-run period.",
+      "comment": "agent broker: open Arc cluster-connect tunnels to the shared homelab k3s cluster on dockhost. Re-pointed 2026-08-05: the cluster was re-registered from rg-claude-runner-preview (claude-k8s-preview, a parked 2026-06-23 spike that quietly became load-bearing) to its correct home rg-homelab (dockhost-k3s) alongside the dockhost Arc machine, now that claude-runner is retired and no longer needs the shared registration. Re-registering minted a NEW OIDC issuer, so this grant's scope and every k8s federated credential moved together in one change.",
       "identityName": "id-agent",
       "identityResourceGroup": "rg-agent",
       "scope": "resource",
-      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-claude-runner-preview/providers/Microsoft.Kubernetes/connectedClusters/claude-k8s-preview",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-homelab/providers/Microsoft.Kubernetes/connectedClusters/dockhost-k3s",
       "roles": [
         "Azure Arc Enabled Kubernetes Cluster User Role"
       ]

@@ -86,12 +86,16 @@ Current grants (`role-grants.json` is the truth — this list is a summary):
   visibility for the autonomous coding agent (still can't change Azure outside
   GitHub Actions).
 - `agent` **broker** (`id-agent`) → *Azure Arc Enabled Kubernetes Cluster User
-  Role* on the shared homelab cluster `claude-k8s-preview`. **Load-bearing:**
-  this is the agent platform's homelab session backend, and the cluster lives in
-  `rg-claude-runner-preview` because a k8s cluster can be Arc-connected only
-  once. Do not remove it, and do not delete that connectedCluster — there is no
-  RG-move for `Microsoft.Kubernetes/connectedClusters`, and re-onboarding mints a
-  NEW OIDC issuer URL that invalidates every federated credential.
+  Role* on the homelab cluster `dockhost-k3s` in **`rg-homelab`** (moved here
+  2026-08-05 — this is the agent platform's homelab session backend). It used to
+  live in `rg-claude-runner-preview` as `claude-k8s-preview`: a parked 2026-06-23
+  spike (`test/arc-k8s`) that quietly became load-bearing once claude-runner,
+  then agent, started sharing it rather than registering a second connection —
+  a k8s cluster can be Arc-connected only once. Re-registering it into its
+  correct home (alongside the `dockhost` Arc **machine**, which was always here)
+  needed a delete + reconnect — there is no RG-move for
+  `Microsoft.Kubernetes/connectedClusters` — which mints a NEW OIDC issuer URL;
+  every k8s federated credential moved in the same change as this grant.
 - `agent` **session identity** (`id-agent-session`) → subscription **Reader** +
   **Log Analytics Reader**, plus **Cost Management Reader**.
 - `agent` **local-sysadmin session identity** (`id-agent-session-localsys`) →
