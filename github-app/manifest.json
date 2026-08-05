@@ -1,7 +1,7 @@
 {
   "name": "claude-runner-agent",
-  "url": "https://github.com/KennethHeine/claude-runner",
-  "description": "GitHub identity for Kenneth's claude-runner agent sessions: short-lived installation tokens instead of a personal account.",
+  "url": "https://github.com/KennethHeine/agent",
+  "description": "GitHub identity for Kenneth's agent-platform coding sessions: short-lived installation tokens instead of a personal account. (Named for claude-runner, the platform it was originally created for and which agent has since succeeded — kept as-is so re-running the manifest flow doesn't desync the file from the live app's actual name.)",
   "public": false,
   "default_permissions": {
     "actions": "write",
