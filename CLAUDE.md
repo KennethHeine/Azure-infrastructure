@@ -139,15 +139,17 @@ Current grants (`graph-grants.json` is the truth — this list is a summary):
   invoking Graph API"* and shows raw object ids. Note it is **directory-wide read
   across the tenant** — broader than anything in `role-grants.json`. No write
   permission: RBAC and app-registration changes stay in the control plane.
-- `claude-runner` **business assistant profile** → Microsoft Graph **Mail.Read**
-  (application) on its **unified session identity** `id-claude-runner-session-business`.
+- `agent` **business assistant profile** → Microsoft Graph **Mail.Read**
+  (application) on its **unified session identity** `id-agent-session-business`.
   The business profile runs on both backends as ONE identity — attached to the ACI
   container group *and* federated to the business k8s ServiceAccount (`fc-k8s-business`)
-  — so this single grant covers both. (The former per-backend `id-arck8s-business` is
-  retired; don't grant to it.) Read-only mailbox access for the ask-first business
-  assistant, app-only (no stored refresh token). The tenant has a single mailbox, so
-  no Exchange application access policy is scoped; add one (restricting the app to a
-  mail-enabled security group) if more mailboxes are ever added.
+  — so this single grant covers both. Read-only mailbox access for the ask-first
+  business assistant, app-only (no stored refresh token). The tenant has a single
+  mailbox, so no Exchange application access policy is scoped; add one (restricting
+  the app to a mail-enabled security group) if more mailboxes are ever added.
+  (This grant belonged to claude-runner's equivalent identity until that repo was
+  decommissioned 2026-08-05 — Entra auto-revoked the old assignment when its service
+  principal was deleted, so moving it here was a config-only cleanup.)
 
 ## Templates (GitHub template repositories)
 
@@ -193,8 +195,10 @@ granted by the caller).
 **`authAppUserImpersonationScopeId`**, **`azureCliClientId`**. `appName` unset (or
 `"app"`) → the workflow derives the sanitized repo name; names derive as
 `ca-/cae-/log-/id-<appName>`. RBAC the app's identity needs at runtime belongs in
-the Bicep (e.g. `claude-runner` grants its UAMI Contributor on `rg-<repo>` in
-Bicep so it can manage per-session ACI), **not** as an imperative workflow step.
+the Bicep (e.g. `agent` grants its broker UAMI the specific *ACI Contributor*
+role, RG-scoped, so it can manage per-session ACI — not a blanket `Contributor`,
+matching the repo's own least-privilege invariant), **not** as an imperative
+workflow step.
 
 ## Reusable static-web workflows (single source of truth)
 
@@ -292,7 +296,8 @@ deploy, never a single risky one.
 
 A container-app repo with `"preview": true` in `repos.json` gets an **isolated
 sandbox** so non-`main` branches can deploy without any path to prod. Today only
-`claude-runner` opts in; the OIDC/routing mechanism is generic.
+`agent` opts in (claude-runner did too, until it was decommissioned 2026-08-05);
+the OIDC/routing mechanism is generic.
 
 **Why a separate identity.** A GitHub OIDC token doesn't carry its branch into
 Azure role scope, so isolation can't come from the credential — it comes from a
@@ -321,18 +326,24 @@ the prod hostname — preview is reached on its default FQDN) and `enableAlerts=
 alert-rule deploy). `deploy-app` forces the app to **`--min-replicas 0`** so the
 sandbox scales to zero. Non-preview callers resolve to the prod SP/RG — byte-identical.
 
-**The caller opts in** (`claude-runner`'s `deploy-infra.yml`/`deploy-app.yml`):
+**The caller opts in** (`agent`'s `deploy-infra.yml`/`deploy-app.yml`):
 `with: { preview: true }`, a `test/**` push trigger, and the prod-only `verify`
 job is skipped on non-`main`. So **push a `test/**` branch → preview; `main` → prod.**
 deploy-app concurrency is keyed per `github.ref` so prod and preview deploys
 never cancel each other.
 
-**Base-split + preview ACR.** Because `claude-runner`'s slim Dockerfiles `FROM`
-its base images, a fresh (empty) preview ACR can't resolve them and
-`prime-base-images` can't import internal `*-base` from Docker Hub. So
-`claude-runner`'s `build-base-images.yml` has a **`preview-seed`** job that builds
-the bases into the preview ACR too, as the preview SP (gated on
-`RESOURCE_GROUP_PREVIEW`).
+**Base-split + preview ACR (a trap this pattern can hit, not a step every repo
+needs).** claude-runner's slim Dockerfiles `FROM` its own base images, so its
+fresh (empty) preview ACR couldn't resolve them and `prime-base-images` couldn't
+import internal `*-base` tags from Docker Hub — its `build-base-images.yml` grew
+a dedicated **`preview-seed`** job (as the preview SP, gated on
+`RESOURCE_GROUP_PREVIEW`) to build the bases into the preview ACR too. `agent`
+has an analogous base-split (`session-base.Dockerfile`/`broker-base.Dockerfile`)
+but its `test/**` preview deploys have succeeded repeatedly with no equivalent
+job — so either its base-image resolution doesn't hit the same gap, or it's
+tolerating slower/failed-then-retried preview builds; **not independently
+verified**, flagging rather than asserting. If a future preview-opted repo's
+slim Dockerfiles FROM its own internal base images, check this first.
 
 **Cost.** Compute scales to zero; the only standing cost is the preview ACR
 (~$5/mo Basic). Infra is kept standing (no idle teardown) for fast feedback — a
@@ -414,17 +425,20 @@ selector CNAMEs haven't propagated yet can't be enabled (EXO reports `CnameMissi
 — that's reported as **pending**, not a failure, and self-heals on the next run. DKIM
 needs both halves: the selector CNAMEs in `dns/records.platform.json` **and** the enable here.
 
-## GitHub App for the claude-runner agent (as code)
+## GitHub App for coding-agent sessions (as code)
 
-The `claude-runner` agent sessions authenticate to GitHub with a **GitHub App**
+Autonomous coding-agent sessions authenticate to GitHub with a **GitHub App**
 (short-lived installation tokens; safer than a personal account). GitHub does
 not allow creating apps via plain REST/Bicep, so this repo codifies the maximum
-GitHub supports — the **app manifest flow**:
+GitHub supports — the **app manifest flow**. The app is still literally named
+`claude-runner-agent` — created for that platform, and kept installed/reused by
+its successor `agent` rather than recreated, since re-running the manifest flow
+mints a brand-new app id (see `create-github-app.ps1`'s own idempotency note).
 
 | File | Holds |
 |------|-------|
 | `github-app/manifest.json` | The app definition: name `claude-runner-agent`, no webhook, repository permissions Contents/Actions/Workflows/PRs/Issues **RW** + Metadata R |
-| `scripts/create-github-app.ps1` | Drives the manifest flow end-to-end: browser confirm (once) → exchanges the code for app id + private key → uploads the PEM **directly into the claude-runner Key Vault** (`github-app-private-key`) → prints the install link and the `githubAppId` value to set in `claude-runner/infra/main.parameters.json` |
+| `scripts/create-github-app.ps1` | Drives the manifest flow end-to-end: browser confirm (once) → exchanges the code for app id + private key → uploads the PEM **directly into the target repo's Key Vault** (`github-app-private-key`, defaults to `agent`'s) → prints the install link and the `githubAppId` value to set in that repo's `infra/main.parameters.json` |
 
 Run it from a machine with a browser + `az login`. Key rotation does **not**
 need the script: generate a new key on the app's GitHub page and
