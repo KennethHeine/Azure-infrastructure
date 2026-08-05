@@ -83,14 +83,6 @@
     },
     {
       "type": "CNAME",
-      "name": "claude",
-      "ttl": 300,
-      "values": [
-        "ca-claude-runner.prouddune-982184eb.swedencentral.azurecontainerapps.io"
-      ]
-    },
-    {
-      "type": "CNAME",
       "name": "mayer",
       "ttl": 3600,
       "values": [
