@@ -32,10 +32,10 @@ targetScope = 'resourceGroup'
 @description('Azure region for the shared registry.')
 param location string = resourceGroup().location
 
-@description('Registry name — globally unique across Azure, alphanumeric only. Fixed (not uniqueString-suffixed) because this is a estate-wide singleton, not a per-repo resource.')
+@description('Registry name — globally unique across Azure, alphanumeric only. Fixed (not uniqueString-suffixed) because this is an estate-wide singleton, not a per-repo resource.')
 param registryName string = 'acrkscloud'
 
-resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = {
+resource acr 'Microsoft.ContainerRegistry/registries@2025-11-01' = {
   name: registryName
   location: location
   sku: {
