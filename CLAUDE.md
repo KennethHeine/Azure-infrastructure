@@ -81,10 +81,6 @@ identity whose repo hasn't deployed yet is a warning, not a failure (re-run
 single resource OUTSIDE the identity's repo RG, named by `scopeResourceId`).
 
 Current grants (`role-grants.json` is the truth — this list is a summary):
-- `claude-runner` **coder-session identity** (`id-claude-runner-session-coder`)
-  → subscription **Reader** + **Log Analytics Reader** — read-only estate
-  visibility for the autonomous coding agent (still can't change Azure outside
-  GitHub Actions).
 - `agent` **broker** (`id-agent`) → *Azure Arc Enabled Kubernetes Cluster User
   Role* on the homelab cluster `dockhost-k3s` in **`rg-homelab`** (moved here
   2026-08-05 — this is the agent platform's homelab session backend). It used to

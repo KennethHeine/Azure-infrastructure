@@ -2,16 +2,6 @@
   "$schema": "./role-grants.schema.json",
   "grants": [
     {
-      "comment": "claude-runner coder sessions: read-only estate visibility (resource state + runtime logs) — the agent debugs deployed apps but cannot change Azure outside GitHub Actions.",
-      "identityName": "id-claude-runner-session-coder",
-      "identityResourceGroup": "rg-claude-runner",
-      "scope": "subscription",
-      "roles": [
-        "Reader",
-        "Log Analytics Reader"
-      ]
-    },
-    {
       "comment": "agent broker: open Arc cluster-connect tunnels to the shared homelab k3s cluster on dockhost. Re-pointed 2026-08-05: the cluster was re-registered from rg-claude-runner-preview (claude-k8s-preview, a parked 2026-06-23 spike that quietly became load-bearing) to its correct home rg-homelab (dockhost-k3s) alongside the dockhost Arc machine, now that claude-runner is retired and no longer needs the shared registration. Re-registering minted a NEW OIDC issuer, so this grant's scope and every k8s federated credential moved together in one change.",
       "identityName": "id-agent",
       "identityResourceGroup": "rg-agent",
