@@ -38,7 +38,16 @@
             "type": "array",
             "minItems": 1,
             "items": { "type": "string" },
-            "description": "Built-in role names to assign (e.g. Reader, Log Analytics Reader)."
+            "description": "Built-in role names to assign (e.g. Reader, Log Analytics Reader). All roles in one grant share the same condition (or lack of one) — a role that can't carry an ABAC condition (e.g. Container Registry Repository Catalog Lister) needs its own separate grant entry for the same identity, same as the existing pattern of multiple entries per identity."
+          },
+          "condition": {
+            "type": "string",
+            "description": "Optional Azure ABAC condition expression, applied to every role in this grant. Only meaningful for ABAC-enabled roles (e.g. the ACR 'Container Registry Repository Reader/Writer/Contributor' roles on a registry with roleAssignmentMode 'rbac-abac') — assigning an ABAC-enabled role WITHOUT a condition grants registry-wide access, not repository-scoped access. Requires conditionVersion. NOTE idempotency caveat: apply-role-grants.ps1's existing-assignment check matches on (assignee, role, scope) only — it does not compare condition text, so editing a condition on an already-applied grant will not re-apply it. Delete the stale assignment (az role assignment delete) to force recreation."
+          },
+          "conditionVersion": {
+            "type": "string",
+            "enum": ["2.0"],
+            "description": "Azure ABAC condition syntax version. Required when condition is set; \"2.0\" is the only currently supported value."
           }
         },
         "allOf": [
@@ -48,6 +57,10 @@
               "required": ["scope"]
             },
             "then": { "required": ["scopeResourceId"] }
+          },
+          {
+            "if": { "required": ["condition"] },
+            "then": { "required": ["conditionVersion"] }
           }
         ]
       }

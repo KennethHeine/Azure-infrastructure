@@ -13,6 +13,13 @@
 # exist yet (its repo's infra deploy hasn't run) is a warning, not a failure;
 # the grant is applied on the next onboarding run.
 #
+# A grant may carry an ABAC 'condition' + 'conditionVersion' (e.g. to scope an
+# ACR "Container Registry Repository Writer" role to one repository path on a
+# shared, ABAC-enabled registry). CAVEAT: the existing-assignment check below
+# matches on (assignee, role, scope) only, not condition text — so editing a
+# condition on an already-applied grant will not re-apply it; delete the stale
+# assignment first (az role assignment delete) to force recreation.
+#
 # Usage:
 #   .\scripts\apply-role-grants.ps1                          # use ./role-grants.json
 #   .\scripts\apply-role-grants.ps1 -ConfigFile other.json   # explicit config path
@@ -92,9 +99,19 @@ foreach ($grant in $grants) {
             Write-Host "  '$role' at $($grant.scope) — already assigned" -ForegroundColor DarkGray
             continue
         }
-        Write-Host "  '$role' at $($grant.scope) — assigning…" -ForegroundColor Yellow
-        az role assignment create --assignee-object-id $principalId --assignee-principal-type ServicePrincipal `
-            --role $role --scope $scope --only-show-errors | Out-Null
+        $conditionNote = if ($grant.condition) { " (ABAC-conditioned)" } else { "" }
+        Write-Host "  '$role' at $($grant.scope)$conditionNote — assigning…" -ForegroundColor Yellow
+        $createArgs = @(
+            '--assignee-object-id', $principalId,
+            '--assignee-principal-type', 'ServicePrincipal',
+            '--role', $role,
+            '--scope', $scope,
+            '--only-show-errors'
+        )
+        if ($grant.condition) {
+            $createArgs += @('--condition', $grant.condition, '--condition-version', $grant.conditionVersion)
+        }
+        az role assignment create @createArgs | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::Failed to assign '$role' to $name"
             $failed = $true

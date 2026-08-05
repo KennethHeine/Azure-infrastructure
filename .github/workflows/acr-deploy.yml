@@ -1,0 +1,45 @@
+name: Deploy Shared ACR
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches: [main]
+    paths: ['acr/**']
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-acr
+  LOCATION: swedencentral
+
+jobs:
+  deploy:
+    name: Deploy shared ACR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Deploy with the runner's preinstalled az CLI (already authenticated by the
+      # OIDC login above) instead of azure/arm-deploy@v2, same as dns-deploy.yml.
+      - name: Deploy ACR Bicep
+        shell: bash
+        run: |
+          set -euo pipefail
+          az group create --name "$RESOURCE_GROUP" --location "$LOCATION" --only-show-errors >/dev/null
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "acr-${{ github.run_number }}" \
+            --template-file ./acr/main.bicep \
+            --only-show-errors
