@@ -33,12 +33,6 @@
     },
     "homelab",
     {
-      "name": "claude-runner",
-      "template": "container-app",
-      "auth": true,
-      "preview": true
-    },
-    {
       "name": "oliver-demo",
       "template": "container-app",
       "auth": false
