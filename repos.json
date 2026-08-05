@@ -33,11 +33,6 @@
     },
     "homelab",
     {
-      "name": "oliver-demo",
-      "template": "container-app",
-      "auth": false
-    },
-    {
       "name": "meyer-party",
       "template": "container-app",
       "auth": false
