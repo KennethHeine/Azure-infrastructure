@@ -51,6 +51,21 @@ on:
         type: boolean
         required: false
         default: false
+      shared_acr:
+        description: >
+          Opt in to the estate-wide shared registry (acrkscloud, rg-acr) instead of this
+          repo's own per-repo ACR. Default false — every existing caller is unchanged.
+          Requires role-grants.json to already grant this repo's deploy SP
+          'Container Registry Repository Contributor' (push AND delete — cleanup below
+          needs delete, plain Writer doesn't have it) and its runtime UAMI 'Container
+          Registry Repository Reader', both ABAC-conditioned to this repo's own
+          '<repo>/' path prefix. Images are namespaced '<repo>/app[<suffix>]' (not bare
+          '<repo>[<suffix>]') specifically so that prefix condition has a safe '/'
+          boundary — a bare-name prefix could accidentally match a different repo whose
+          name starts with the same string.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   id-token: write
@@ -66,6 +81,7 @@ jobs:
       containerAppName: ${{ steps.derive.outputs.containerAppName }}
       acrName: ${{ steps.derive.outputs.acrName }}
       acrLoginServer: ${{ steps.derive.outputs.acrLoginServer }}
+      imageRepo: ${{ steps.derive.outputs.imageRepo }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -101,19 +117,31 @@ jobs:
           fi
           CONTAINER_APP_NAME="ca-${APP_NAME}"
 
-          # This repo has exactly one ACR (its own, in this resource group),
-          # created by deploy-infra. Discover it rather than relying on repo vars.
-          ACR_NAME=$(az acr list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)
-          ACR_LOGIN_SERVER=$(az acr list -g "$RESOURCE_GROUP" --query "[0].loginServer" -o tsv)
-          if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
-            echo "::error::No ACR found in '$RESOURCE_GROUP'. Run Deploy Infrastructure first."
-            exit 1
+          if [ "${{ inputs.shared_acr }}" = "true" ]; then
+            # Estate-wide singleton (see acr/main.bicep in this repo) — fixed name,
+            # not discovered, so this job needs no permission on rg-acr at all just
+            # to resolve it. IMAGE_REPO namespaces every image this repo builds
+            # under '<repo>/' so ABAC conditions can safely prefix-match on it.
+            ACR_NAME="acrkscloud"
+            ACR_LOGIN_SERVER="acrkscloud.azurecr.io"
+            IMAGE_REPO="${{ github.event.repository.name }}/app"
+          else
+            # This repo has exactly one ACR (its own, in this resource group),
+            # created by deploy-infra. Discover it rather than relying on repo vars.
+            ACR_NAME=$(az acr list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+            ACR_LOGIN_SERVER=$(az acr list -g "$RESOURCE_GROUP" --query "[0].loginServer" -o tsv)
+            IMAGE_REPO="${{ github.event.repository.name }}"
+            if [ -z "$ACR_NAME" ] || [ "$ACR_NAME" = "null" ]; then
+              echo "::error::No ACR found in '$RESOURCE_GROUP'. Run Deploy Infrastructure first."
+              exit 1
+            fi
           fi
 
           echo "resourceGroup=$RESOURCE_GROUP" >> "$GITHUB_OUTPUT"
           echo "containerAppName=$CONTAINER_APP_NAME" >> "$GITHUB_OUTPUT"
           echo "acrName=$ACR_NAME" >> "$GITHUB_OUTPUT"
           echo "acrLoginServer=$ACR_LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+          echo "imageRepo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
 
   # Keep Docker Hub base images cached in the repo's own ACR. `az acr build`
   # agents pull from Docker Hub anonymously via a shared egress IP, which
@@ -220,7 +248,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          REPO='${{ github.event.repository.name }}'
+          IMAGE_REPO='${{ needs.setup.outputs.imageRepo }}'
           # Expose this repo's ACR login server so a Dockerfile can pull base
           # images through an ACR pull-through cache (avoids Docker Hub's
           # anonymous pull-rate limit). Dockerfiles that don't declare the
@@ -228,8 +256,8 @@ jobs:
           az acr build \
             --registry '${{ needs.setup.outputs.acrName }}' \
             --build-arg ACR_LOGIN_SERVER='${{ needs.setup.outputs.acrLoginServer }}' \
-            --image "${REPO}:${{ github.sha }}" \
-            --image "${REPO}:latest" \
+            --image "${IMAGE_REPO}:${{ github.sha }}" \
+            --image "${IMAGE_REPO}:latest" \
             --file Dockerfile .
 
       # Opt-in path (app_image_cache: gha): build with BuildKit on the runner so a
@@ -257,8 +285,8 @@ jobs:
           build-args: |
             ACR_LOGIN_SERVER=${{ needs.setup.outputs.acrLoginServer }}
           tags: |
-            ${{ needs.setup.outputs.acrLoginServer }}/${{ github.event.repository.name }}:${{ github.sha }}
-            ${{ needs.setup.outputs.acrLoginServer }}/${{ github.event.repository.name }}:latest
+            ${{ needs.setup.outputs.acrLoginServer }}/${{ needs.setup.outputs.imageRepo }}:${{ github.sha }}
+            ${{ needs.setup.outputs.acrLoginServer }}/${{ needs.setup.outputs.imageRepo }}:latest
           cache-from: type=gha,scope=${{ github.event.repository.name }}-app
           cache-to: type=gha,scope=${{ github.event.repository.name }}-app,mode=max
 
@@ -286,15 +314,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          REPO='${{ github.event.repository.name }}'
+          IMAGE_REPO='${{ needs.setup.outputs.imageRepo }}'
           SUFFIX='${{ matrix.image.suffix }}'
           # See build-app: ACR_LOGIN_SERVER lets a Dockerfile cache base images
           # through this repo's ACR; ignored by Dockerfiles that don't use it.
           az acr build \
             --registry '${{ needs.setup.outputs.acrName }}' \
             --build-arg ACR_LOGIN_SERVER='${{ needs.setup.outputs.acrLoginServer }}' \
-            --image "${REPO}${SUFFIX}:${{ github.sha }}" \
-            --image "${REPO}${SUFFIX}:latest" \
+            --image "${IMAGE_REPO}${SUFFIX}:${{ github.sha }}" \
+            --image "${IMAGE_REPO}${SUFFIX}:latest" \
             --file '${{ matrix.image.dockerfile }}' \
             '${{ matrix.image.context }}'
 
@@ -318,10 +346,9 @@ jobs:
           IS_PREVIEW: ${{ inputs.preview && github.ref != 'refs/heads/main' }}
         run: |
           set -euo pipefail
-          REPO='${{ github.event.repository.name }}'
           APP='${{ needs.setup.outputs.containerAppName }}'
           RG='${{ needs.setup.outputs.resourceGroup }}'
-          IMAGE='${{ needs.setup.outputs.acrLoginServer }}/'"${REPO}:${{ github.sha }}"
+          IMAGE='${{ needs.setup.outputs.acrLoginServer }}/'"${{ needs.setup.outputs.imageRepo }}:${{ github.sha }}"
           # Preview sandboxes must always scale to zero (compute → ~$0 when idle),
           # forced here app-agnostically so it holds regardless of the app's Bicep
           # — claude-runner's PROD broker deliberately runs min-replicas 1 for the
@@ -378,10 +405,21 @@ jobs:
           LOGIN: ${{ needs.setup.outputs.acrLoginServer }}
           RG: ${{ needs.setup.outputs.resourceGroup }}
           KEEP: ${{ inputs.image_retention_count }}
+          IMAGE_REPO: ${{ needs.setup.outputs.imageRepo }}
+          EXTRA_IMAGES: ${{ inputs.extra_images }}
+          SHARED_ACR: ${{ inputs.shared_acr }}
         run: |
           set -euo pipefail
 
-          before=$(az acr show-usage -n "$ACR" --query "value[?name=='Size'].currentValue | [0]" -o tsv)
+          # az acr show-usage is a control-plane ARM read
+          # (Microsoft.ContainerRegistry/registries/read). Under shared-ACR ABAC
+          # mode this repo's SP holds only the ABAC-conditioned DATA-plane role
+          # (Repository Contributor scoped to its own path) and may hold no
+          # control-plane role on rg-acr at all, so this can 403. It's purely
+          # informational logging below — never load-bearing — so fall back to
+          # "unknown" instead of aborting the whole cleanup on it.
+          usage() { az acr show-usage -n "$ACR" --query "value[?name=='Size'].currentValue | [0]" -o tsv 2>/dev/null || echo "unknown"; }
+          before=$(usage)
 
           # 1. Image refs in use anywhere in this resource group. set -e: if
           #    any of these queries fails we abort here, deleting nothing.
@@ -402,7 +440,25 @@ jobs:
           cutoff=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%S)
           deleted=0
 
-          for repo in $(az acr repository list -n "$ACR" -o tsv); do
+          # Repos to inspect. Own-registry mode (default): list everything, as
+          # before — this repo's dedicated ACR only ever holds its own images.
+          # Shared-ACR mode: ABAC-enabled roles can't list the registry catalog
+          # (that needs the unconditioned Catalog Lister role, which would expose
+          # every OTHER repo's catalog too, defeating the point) — and this SP's
+          # role is condition-scoped to its own '<repo>/' path regardless. So
+          # derive the small set this workflow itself owns instead: the app
+          # image plus one per extra_images suffix.
+          if [ "$SHARED_ACR" = "true" ]; then
+            repos="$IMAGE_REPO"
+            while IFS= read -r suffix; do
+              [ -z "$suffix" ] && continue
+              repos="${repos}$(printf '\n')${IMAGE_REPO}${suffix}"
+            done <<< "$(echo "$EXTRA_IMAGES" | jq -r '.[].suffix // empty')"
+          else
+            repos=$(az acr repository list -n "$ACR" -o tsv)
+          fi
+
+          for repo in $repos; do
             echo "=== repository: $repo"
             # time_desc so the newest-N slice below is correct; if a registry
             # ever exceeds --top, the unseen tail is simply not deleted yet.
@@ -449,5 +505,9 @@ jobs:
             done
           done
 
-          after=$(az acr show-usage -n "$ACR" --query "value[?name=='Size'].currentValue | [0]" -o tsv)
-          echo "Deleted $deleted stale manifest(s). Registry usage: $((before/1024/1024)) MiB -> $((after/1024/1024)) MiB (usage metric can lag a few minutes)."
+          after=$(usage)
+          if [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]]; then
+            echo "Deleted $deleted stale manifest(s). Registry usage: $((before/1024/1024)) MiB -> $((after/1024/1024)) MiB (usage metric can lag a few minutes)."
+          else
+            echo "Deleted $deleted stale manifest(s). Registry usage: unavailable (no control-plane read on the registry in this mode)."
+          fi
