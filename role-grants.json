@@ -152,6 +152,86 @@
       "roles": ["Container Registry Repository Reader"],
       "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent-preview/' ) )",
       "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent session identity, PROD (id-agent-session, rg-agent): read-only pull from the shared ACR for launching a session container with its OWN identity (not the broker's, per the least-privilege split — a session never carries the broker's ARM-privileged identity) — ABAC-conditioned to 'agent/' only, same as id-agent's grant above.",
+      "identityName": "id-agent-session",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent session identity, PROD (id-agent-session-localsys, rg-agent): same as id-agent-session above — one per profile, ABAC-conditioned to 'agent/' only.",
+      "identityName": "id-agent-session-localsys",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent session identity, PROD (id-agent-session-personal, rg-agent): same as id-agent-session above — one per profile, ABAC-conditioned to 'agent/' only.",
+      "identityName": "id-agent-session-personal",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent session identity, PROD (id-agent-session-business, rg-agent): same as id-agent-session above — one per profile, ABAC-conditioned to 'agent/' only.",
+      "identityName": "id-agent-session-business",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent session identity, PREVIEW (id-agent-session, rg-agent-preview): same as the PROD entry above, ABAC-conditioned to 'agent-preview/' only.",
+      "identityName": "id-agent-session",
+      "identityResourceGroup": "rg-agent-preview",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent-preview/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent session identity, PREVIEW (id-agent-session-localsys, rg-agent-preview): same as the PROD entry above, ABAC-conditioned to 'agent-preview/' only.",
+      "identityName": "id-agent-session-localsys",
+      "identityResourceGroup": "rg-agent-preview",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent-preview/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent session identity, PREVIEW (id-agent-session-personal, rg-agent-preview): same as the PROD entry above, ABAC-conditioned to 'agent-preview/' only.",
+      "identityName": "id-agent-session-personal",
+      "identityResourceGroup": "rg-agent-preview",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent-preview/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent session identity, PREVIEW (id-agent-session-business, rg-agent-preview): same as the PROD entry above, ABAC-conditioned to 'agent-preview/' only.",
+      "identityName": "id-agent-session-business",
+      "identityResourceGroup": "rg-agent-preview",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent-preview/' ) )",
+      "conditionVersion": "2.0"
     }
   ]
 }
