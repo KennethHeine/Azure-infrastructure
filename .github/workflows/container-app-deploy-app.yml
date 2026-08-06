@@ -483,7 +483,7 @@ jobs:
             repos="$IMAGE_REPO"
             while IFS= read -r suffix; do
               [ -z "$suffix" ] && continue
-              repos="${repos}$(printf '\n')${IMAGE_REPO}${suffix}"
+              repos="${repos}"$'\n'"${IMAGE_REPO}${suffix}"
             done <<< "$(echo "$EXTRA_IMAGES" | jq -r '.[].suffix // empty')"
           else
             repos=$(az acr repository list -n "$ACR" -o tsv)
