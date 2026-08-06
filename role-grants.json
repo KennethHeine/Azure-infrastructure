@@ -96,6 +96,62 @@
       "roles": ["Container Registry Repository Reader"],
       "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'cvr-portal/' ) )",
       "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent CI/deploy SP, PROD (sp-agent-github): push + cleanup-delete on the shared ACR, ABAC-conditioned to 'agent/' only. Third repo migrated (2026-08-06) and the first with a live preview environment — preview uses its OWN distinct prefix 'agent-preview/' (see the preview grants below and container-app-deploy-app.yml's IMAGE_REPO logic), so this condition genuinely cannot reach anything preview pushes: 'agent-preview/...' does not start with 'agent/' (differs at the 6th character).",
+      "identityName": "sp-agent-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Contributor"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/delete'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/delete'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent CI/deploy SP, PROD: the unconditioned control-plane pair every shared-ACR repo needs — see Azure-infrastructure/CLAUDE.md. Same as inference-lab/cvr-portal.",
+      "identityName": "sp-agent-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Data Importer and Data Reader", "Container Registry Tasks Contributor"]
+    },
+    {
+      "comment": "agent runtime pull identity, PROD (id-agent, rg-agent): read-only pull from the shared ACR, ABAC-conditioned to 'agent/' only.",
+      "identityName": "id-agent",
+      "identityResourceGroup": "rg-agent",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent CI/deploy SP, PREVIEW (sp-agent-preview-github): push + cleanup-delete on the shared ACR, ABAC-conditioned to 'agent-preview/' only — a DIFFERENT top-level prefix from prod's 'agent/', not a sub-path of it, so this identity (Owner of rg-agent-preview only, per the estate's preview-isolation design — 'it can never touch prod') genuinely cannot write anywhere under 'agent/'.",
+      "identityName": "sp-agent-preview-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Contributor"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/delete'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/delete'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent-preview/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "agent CI/deploy SP, PREVIEW: the unconditioned control-plane pair (see PROD entry above for why). Registry-wide by the ACR permission model's own design, same as every other repo's pair — this does not let preview touch prod's repository content, only trigger imports/builds, which the ABAC condition above still gates by path.",
+      "identityName": "sp-agent-preview-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Data Importer and Data Reader", "Container Registry Tasks Contributor"]
+    },
+    {
+      "comment": "agent runtime pull identity, PREVIEW (id-agent, rg-agent-preview — same resource NAME as prod's pull identity, but a distinct object in a distinct RG): read-only pull from the shared ACR, ABAC-conditioned to 'agent-preview/' only.",
+      "identityName": "id-agent",
+      "identityResourceGroup": "rg-agent-preview",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent-preview/' ) )",
+      "conditionVersion": "2.0"
     }
   ]
 }
