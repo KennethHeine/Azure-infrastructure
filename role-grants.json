@@ -52,6 +52,14 @@
       "conditionVersion": "2.0"
     },
     {
+      "comment": "inference-lab CI/deploy SP: two CONTROL-PLANE roles the ABAC data-plane grant above cannot cover — discovered empirically 2026-08-06 when container-app-deploy-app.yml's prime-base-images job failed `az acr import -n acrkscloud` with '...could not be found in subscription' (the ABAC data-plane roles grant ZERO Microsoft.ContainerRegistry/registries/read, so the registry can't even be resolved by name). Neither role below supports Entra ABAC conditions (confirmed against the ACR built-in roles directory reference) — registry-wide is this permission model's own floor, not a design choice here:\n        - Container Registry Data Importer and Data Reader: control-plane trigger for `az acr import` (prime-base-images caching Docker Hub base images into the shared registry) + registry-wide PULL-only data access to verify the import succeeded. No push/write/delete anywhere in the registry.\n        - Container Registry Tasks Contributor: control-plane permission to trigger `az acr build` quick builds. The actual data-plane push (to inference-lab/app) stays gated by the ABAC-conditioned Contributor grant above — this only lets the SP schedule the build.\n      Every other repo migrated to the shared registry will need this identical unconditioned pair alongside its own ABAC-conditioned data-plane grant.",
+      "identityName": "sp-inference-lab-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Data Importer and Data Reader", "Container Registry Tasks Contributor"]
+    },
+    {
       "comment": "inference-lab runtime pull identity (id-inference-lab, rg-inference-lab): read-only pull from the shared ACR, ABAC-conditioned to this repo's own 'inference-lab/' path only. Companion to the CI grant above — same '/' prefix boundary, same 2026-08-06 first-repo migration.",
       "identityName": "id-inference-lab",
       "identityResourceGroup": "rg-inference-lab",
