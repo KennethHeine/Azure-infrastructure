@@ -253,12 +253,27 @@ jobs:
           # images through an ACR pull-through cache (avoids Docker Hub's
           # anonymous pull-rate limit). Dockerfiles that don't declare the
           # ARG simply ignore it (BuildKit warns, build still succeeds).
+          #
+          # Shared-ACR mode: az acr build is a Quick Build (an ACR Task run),
+          # which under ABAC has ZERO default data-plane access to its own
+          # target registry — confirmed live: "when specifying push, at least
+          # one credential is required". --source-acr-auth-id [caller] tells
+          # the Task run to authenticate as the caller (this SP), whose ABAC
+          # grants (Contributor on inference-lab/, plus the registry-wide
+          # Data Importer pull for any FROM base image outside that path)
+          # then govern the run exactly as they would a direct push/pull.
+          # Own-registry mode is unaffected (non-ABAC registry, flag omitted).
+          SOURCE_AUTH_ARGS=()
+          if [ "${{ inputs.shared_acr }}" = "true" ]; then
+            SOURCE_AUTH_ARGS=(--source-acr-auth-id '[caller]')
+          fi
           az acr build \
             --registry '${{ needs.setup.outputs.acrName }}' \
             --build-arg ACR_LOGIN_SERVER='${{ needs.setup.outputs.acrLoginServer }}' \
             --image "${IMAGE_REPO}:${{ github.sha }}" \
             --image "${IMAGE_REPO}:latest" \
-            --file Dockerfile .
+            --file Dockerfile . \
+            "${SOURCE_AUTH_ARGS[@]}"
 
       # Opt-in path (app_image_cache: gha): build with BuildKit on the runner so a
       # GitHub Actions layer cache can skip unchanged layers (e.g. npm ci when the
@@ -318,13 +333,19 @@ jobs:
           SUFFIX='${{ matrix.image.suffix }}'
           # See build-app: ACR_LOGIN_SERVER lets a Dockerfile cache base images
           # through this repo's ACR; ignored by Dockerfiles that don't use it.
+          # Shared-ACR mode needs --source-acr-auth-id — see build-app's comment.
+          SOURCE_AUTH_ARGS=()
+          if [ "${{ inputs.shared_acr }}" = "true" ]; then
+            SOURCE_AUTH_ARGS=(--source-acr-auth-id '[caller]')
+          fi
           az acr build \
             --registry '${{ needs.setup.outputs.acrName }}' \
             --build-arg ACR_LOGIN_SERVER='${{ needs.setup.outputs.acrLoginServer }}' \
             --image "${IMAGE_REPO}${SUFFIX}:${{ github.sha }}" \
             --image "${IMAGE_REPO}${SUFFIX}:latest" \
             --file '${{ matrix.image.dockerfile }}' \
-            '${{ matrix.image.context }}'
+            '${{ matrix.image.context }}' \
+            "${SOURCE_AUTH_ARGS[@]}"
 
   # Point the Container App at the freshly built app image. Runs once all builds
   # are done; tolerates build-extra being skipped (no extra images).
