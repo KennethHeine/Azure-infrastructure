@@ -122,9 +122,19 @@ jobs:
             # not discovered, so this job needs no permission on rg-acr at all just
             # to resolve it. IMAGE_REPO namespaces every image this repo builds
             # under '<repo>/' so ABAC conditions can safely prefix-match on it.
+            # Preview gets its OWN top-level prefix ('<repo>-preview/', mirroring
+            # rg-<repo>-preview) rather than nesting under '<repo>/' — the prod SP's
+            # ABAC condition is 'StringStartsWithIgnoreCase <repo>/', which does NOT
+            # match '<repo>-preview/...' (different 6th character), so this keeps
+            # preview unable to touch prod's path exactly as the separate preview
+            # SP/RG already guarantee everywhere else.
             ACR_NAME="acrkscloud"
             ACR_LOGIN_SERVER="acrkscloud.azurecr.io"
-            IMAGE_REPO="${{ github.event.repository.name }}/app"
+            REPO_SLUG="${{ github.event.repository.name }}"
+            if [ "${IS_PREVIEW:-false}" = "true" ]; then
+              REPO_SLUG="${REPO_SLUG}-preview"
+            fi
+            IMAGE_REPO="${REPO_SLUG}/app"
           else
             # This repo has exactly one ACR (its own, in this resource group),
             # created by deploy-infra. Discover it rather than relying on repo vars.
