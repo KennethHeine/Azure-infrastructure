@@ -234,13 +234,13 @@
       "conditionVersion": "2.0"
     },
     {
-      "comment": "trading-lab CI/deploy SP (sp-trading-lab-github): push on the shared ACR, ABAC-conditioned to 'trading-lab/' only. This repo builds with plain `docker build` + `az acr login` + `docker push` (not az acr build/az acr import — no ACR Tasks involved at all), so unlike every other migrated repo it needs NEITHER the unconditioned Data Importer/Tasks Contributor pair NOR --source-acr-auth-id anywhere in its workflows. Writer (not Contributor): nothing in this repo's workflows deletes images yet (see task 'add ACR cleanup to trading-lab's deploy workflows' — separate, not yet done) — upgrade to Contributor if that lands.",
+      "comment": "trading-lab CI/deploy SP (sp-trading-lab-github): push + cleanup-delete on the shared ACR, ABAC-conditioned to 'trading-lab/' only. This repo builds with plain `docker build` + `az acr login` + `docker push` (not az acr build/az acr import — no ACR Tasks involved at all), so unlike every other migrated repo it needs NEITHER the unconditioned Data Importer/Tasks Contributor pair NOR --source-acr-auth-id anywhere in its workflows. Upgraded Writer -> Contributor 2026-08-06 once deploy-dashboard.yml/deploy-app.yml grew image cleanup (delete needs the Contributor DataAction).",
       "identityName": "sp-trading-lab-github",
       "identityType": "servicePrincipal",
       "scope": "resource",
       "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
-      "roles": ["Container Registry Repository Writer"],
-      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'trading-lab/' ) )",
+      "roles": ["Container Registry Repository Contributor"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/delete'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/delete'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'trading-lab/' ) )",
       "conditionVersion": "2.0"
     },
     {
