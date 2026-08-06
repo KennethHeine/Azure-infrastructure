@@ -40,6 +40,26 @@
         "Log Analytics Reader",
         "Cost Management Reader"
       ]
+    },
+    {
+      "comment": "inference-lab CI/deploy SP (sp-inference-lab-github): push + post-deploy cleanup-delete on the shared ACR (acrkscloud, see acr/main.bicep), ABAC-conditioned to this repo's own 'inference-lab/' path only — it cannot read, write, or delete any other repo's images. First repo migrated to the shared registry (2026-08-06), proving the shared-ACR + Entra ABAC isolation pattern before rolling out to the rest. Contributor, not Writer: container-app-deploy-app.yml's cleanup job deletes stale manifests, and Writer has no delete DataAction.",
+      "identityName": "sp-inference-lab-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Contributor"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/delete'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/delete'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'inference-lab/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "inference-lab runtime pull identity (id-inference-lab, rg-inference-lab): read-only pull from the shared ACR, ABAC-conditioned to this repo's own 'inference-lab/' path only. Companion to the CI grant above — same '/' prefix boundary, same 2026-08-06 first-repo migration.",
+      "identityName": "id-inference-lab",
+      "identityResourceGroup": "rg-inference-lab",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'inference-lab/' ) )",
+      "conditionVersion": "2.0"
     }
   ]
 }

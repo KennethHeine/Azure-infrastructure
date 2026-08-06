@@ -10,7 +10,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["identityName", "identityResourceGroup", "scope", "roles"],
+        "required": ["identityName", "scope", "roles"],
         "additionalProperties": false,
         "properties": {
           "comment": {
@@ -19,11 +19,17 @@
           },
           "identityName": {
             "type": "string",
-            "description": "Name of the user-assigned managed identity receiving the roles."
+            "description": "Name of the identity receiving the roles — a managed identity's resource name, or (identityType 'servicePrincipal') an Entra service principal's display name, e.g. a repo's own sp-<repo>-github OIDC deploy identity."
+          },
+          "identityType": {
+            "type": "string",
+            "enum": ["managedIdentity", "servicePrincipal"],
+            "default": "managedIdentity",
+            "description": "What identityName refers to. 'managedIdentity' (default, and every grant before this field existed) = a Microsoft.ManagedIdentity/userAssignedIdentities resource, resolved via 'az identity show -g identityResourceGroup -n identityName'; identityResourceGroup is required. 'servicePrincipal' = an Entra service principal NOT backed by a managed identity resource — e.g. a repo's sp-<repo>-github deploy identity, created directly via az ad app/sp during onboarding — resolved via 'az ad sp list --display-name identityName'; identityResourceGroup does not apply and must be omitted (an Entra service principal isn't scoped to a resource group)."
           },
           "identityResourceGroup": {
             "type": "string",
-            "description": "Resource group containing the identity."
+            "description": "Resource group containing the identity. Required when identityType is 'managedIdentity' (the default); omit when identityType is 'servicePrincipal'."
           },
           "scope": {
             "type": "string",
@@ -61,6 +67,22 @@
           {
             "if": { "required": ["condition"] },
             "then": { "required": ["conditionVersion"] }
+          },
+          {
+            "if": {
+              "not": {
+                "properties": { "identityType": { "const": "servicePrincipal" } },
+                "required": ["identityType"]
+              }
+            },
+            "then": { "required": ["identityResourceGroup"] }
+          },
+          {
+            "if": {
+              "properties": { "identityType": { "const": "servicePrincipal" } },
+              "required": ["identityType"]
+            },
+            "then": { "not": { "required": ["identityResourceGroup"] } }
           }
         ]
       }

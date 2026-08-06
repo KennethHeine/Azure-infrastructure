@@ -67,15 +67,30 @@ $failed = $false
 
 foreach ($grant in $grants) {
     $name = $grant.identityName
-    $rg = $grant.identityResourceGroup
-    Write-Host "Identity $name (in $rg):"
+    $isServicePrincipal = $grant.identityType -eq "servicePrincipal"
 
-    # Resolve the identity's principal id. Not existing yet is expected when
-    # the owning repo's infra deploy hasn't run — warn and continue.
-    $principalId = az identity show -g $rg -n $name --query principalId -o tsv 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $principalId) {
-        Write-Host "::warning::Identity $name not found in $rg — its repo's infra deploy hasn't run yet. Grant skipped; re-run onboarding afterwards."
-        continue
+    # Resolve the principal id. Two identity kinds:
+    #  - managedIdentity (default): a Microsoft.ManagedIdentity resource, via az identity show.
+    #  - servicePrincipal: an Entra SP NOT backed by a managed identity (e.g. a repo's own
+    #    sp-<repo>-github OIDC deploy identity, created via az ad app/sp during onboarding),
+    #    via az ad sp list --display-name. Not existing yet is expected either way when the
+    #    owning repo's infra/onboarding hasn't run — warn and continue, not fail.
+    if ($isServicePrincipal) {
+        Write-Host "Identity $name (service principal):"
+        $principalId = az ad sp list --display-name $name --query '[0].id' -o tsv 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $principalId) {
+            Write-Host "::warning::Service principal $name not found — its repo's onboarding (which creates sp-<repo>-github) hasn't run yet. Grant skipped; re-run onboarding afterwards."
+            continue
+        }
+    }
+    else {
+        $rg = $grant.identityResourceGroup
+        Write-Host "Identity $name (in $rg):"
+        $principalId = az identity show -g $rg -n $name --query principalId -o tsv 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $principalId) {
+            Write-Host "::warning::Identity $name not found in $rg — its repo's infra deploy hasn't run yet. Grant skipped; re-run onboarding afterwards."
+            continue
+        }
     }
 
     # Resolve the assignment scope. 'subscription' = the whole subscription;
