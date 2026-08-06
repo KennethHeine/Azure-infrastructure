@@ -202,9 +202,35 @@ jobs:
           # Import with retries: anonymous Docker Hub pulls 429 under the shared
           # egress IP. A throttled REFRESH of an already-cached image keeps the
           # stale copy (non-fatal); missing + throttled is fatal (FROM would 404).
+          # Resolves the amd64/linux digest for a multi-arch Docker Hub image, so
+          # `az acr import` pulls ONLY that platform's manifest instead of the
+          # full manifest list (multi-arch tags can carry several platform
+          # variants — node:22-alpine alone has ~6). Falls back to the bare tag
+          # (single-platform images, or if inspection fails/throttles) — import
+          # then proceeds exactly as before, just without the filtering
+          # optimization for that one ref.
+          resolve_amd64_source() {
+            local ref="$1" repo="${1%%:*}" n=0 manifest digest
+            until manifest=$(docker manifest inspect "docker.io/${ref}" 2>/dev/null); do
+              n=$((n + 1))
+              if [ "$n" -ge 3 ]; then
+                echo "  (manifest inspect throttled/failed for ${ref}; importing the full tag instead)" >&2
+                echo "docker.io/${ref}"
+                return 0
+              fi
+              sleep 20
+            done
+            digest=$(echo "$manifest" | jq -r '.manifests[]? | select(.platform.architecture=="amd64" and .platform.os=="linux") | .digest' | head -1)
+            if [ -n "$digest" ]; then
+              echo "docker.io/${repo}@${digest}"
+            else
+              echo "docker.io/${ref}"
+            fi
+          }
           import_ref() {
-            local ref="$1" had_copy="$2" n=0
-            until az acr import -n "$ACR_NAME" --source "docker.io/${ref}" -t "$ref" --force; do
+            local ref="$1" had_copy="$2" n=0 source
+            source=$(resolve_amd64_source "$ref")
+            until az acr import -n "$ACR_NAME" --source "$source" -t "$ref" --force; do
               n=$((n + 1))
               if [ "$n" -ge 6 ]; then
                 if [ "$had_copy" = 1 ]; then
