@@ -318,6 +318,62 @@
       "roles": ["Container Registry Repository Reader"],
       "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'meyer-party/' ) )",
       "conditionVersion": "2.0"
+    },
+    {
+      "comment": "kontoplan CI/deploy SP (sp-kontoplan-github): push + cleanup-delete on the shared ACR, ABAC-conditioned to 'kontoplan/' only. Standard pattern. kontoplan is a live household-critical app (kontoplan.kscloud.io) — migrated last, after the pattern was proven on 6 other repos.",
+      "identityName": "sp-kontoplan-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Contributor"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/delete'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/delete'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'kontoplan/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "kontoplan CI/deploy SP: the unconditioned control-plane pair every shared-ACR repo using az acr build/az acr import needs.",
+      "identityName": "sp-kontoplan-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Data Importer and Data Reader", "Container Registry Tasks Contributor"]
+    },
+    {
+      "comment": "kontoplan runtime pull identity (id-kontoplan, rg-kontoplan): read-only pull from the shared ACR, ABAC-conditioned to 'kontoplan/' only.",
+      "identityName": "id-kontoplan",
+      "identityResourceGroup": "rg-kontoplan",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'kontoplan/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "tabt-arbejdsfortjeneste CI/deploy SP (sp-tabt-arbejdsfortjeneste-github): push + cleanup-delete on the shared ACR, ABAC-conditioned to 'tabt-arbejdsfortjeneste/' only. Standard pattern. Live household-critical app (jamie.kscloud.io) — migrated last, after the pattern was proven on 6 other repos.",
+      "identityName": "sp-tabt-arbejdsfortjeneste-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Contributor"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/delete'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/delete'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'tabt-arbejdsfortjeneste/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "tabt-arbejdsfortjeneste CI/deploy SP: the unconditioned control-plane pair every shared-ACR repo using az acr build/az acr import needs.",
+      "identityName": "sp-tabt-arbejdsfortjeneste-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Data Importer and Data Reader", "Container Registry Tasks Contributor"]
+    },
+    {
+      "comment": "tabt-arbejdsfortjeneste runtime pull identity (id-tabt-arbejdsfortjeneste, rg-tabt-arbejdsfortjeneste): read-only pull from the shared ACR, ABAC-conditioned to 'tabt-arbejdsfortjeneste/' only.",
+      "identityName": "id-tabt-arbejdsfortjeneste",
+      "identityResourceGroup": "rg-tabt-arbejdsfortjeneste",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'tabt-arbejdsfortjeneste/' ) )",
+      "conditionVersion": "2.0"
     }
   ]
 }
