@@ -232,6 +232,92 @@
       "roles": ["Container Registry Repository Reader"],
       "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'agent-preview/' ) )",
       "conditionVersion": "2.0"
+    },
+    {
+      "comment": "trading-lab CI/deploy SP (sp-trading-lab-github): push on the shared ACR, ABAC-conditioned to 'trading-lab/' only. This repo builds with plain `docker build` + `az acr login` + `docker push` (not az acr build/az acr import — no ACR Tasks involved at all), so unlike every other migrated repo it needs NEITHER the unconditioned Data Importer/Tasks Contributor pair NOR --source-acr-auth-id anywhere in its workflows. Writer (not Contributor): nothing in this repo's workflows deletes images yet (see task 'add ACR cleanup to trading-lab's deploy workflows' — separate, not yet done) — upgrade to Contributor if that lands.",
+      "identityName": "sp-trading-lab-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Writer"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'trading-lab/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "trading-lab lane-jobs runtime pull identity (id-trading-lab-lane, rg-trading-lab): read-only pull from the shared ACR, ABAC-conditioned to 'trading-lab/' only.",
+      "identityName": "id-trading-lab-lane",
+      "identityResourceGroup": "rg-trading-lab",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'trading-lab/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "trading-lab dashboard runtime pull identity (id-trading-lab-dashboard, rg-trading-lab): read-only pull from the shared ACR, ABAC-conditioned to 'trading-lab/' only.",
+      "identityName": "id-trading-lab-dashboard",
+      "identityResourceGroup": "rg-trading-lab",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'trading-lab/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "article-to-speech CI/deploy SP (sp-article-to-speech-github): push + cleanup-delete on the shared ACR, ABAC-conditioned to 'article-to-speech/' only. Standard pattern (same as inference-lab/cvr-portal).",
+      "identityName": "sp-article-to-speech-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Contributor"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/delete'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/delete'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'article-to-speech/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "article-to-speech CI/deploy SP: the unconditioned control-plane pair every shared-ACR repo using az acr build/az acr import needs — see Azure-infrastructure/CLAUDE.md.",
+      "identityName": "sp-article-to-speech-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Data Importer and Data Reader", "Container Registry Tasks Contributor"]
+    },
+    {
+      "comment": "article-to-speech runtime pull identity (id-articletts, rg-article-to-speech — appName is pinned to 'articletts', not derived from the repo name, but the ABAC condition uses the repo-name path everything else in this estate uses): read-only pull from the shared ACR, ABAC-conditioned to 'article-to-speech/' only.",
+      "identityName": "id-articletts",
+      "identityResourceGroup": "rg-article-to-speech",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'article-to-speech/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "meyer-party CI/deploy SP (sp-meyer-party-github): push + cleanup-delete on the shared ACR, ABAC-conditioned to 'meyer-party/' only. Standard pattern.",
+      "identityName": "sp-meyer-party-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Contributor"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/delete'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/delete'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'meyer-party/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "meyer-party CI/deploy SP: the unconditioned control-plane pair every shared-ACR repo using az acr build/az acr import needs.",
+      "identityName": "sp-meyer-party-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Data Importer and Data Reader", "Container Registry Tasks Contributor"]
+    },
+    {
+      "comment": "meyer-party runtime pull identity (id-meyer-party, rg-meyer-party): read-only pull from the shared ACR, ABAC-conditioned to 'meyer-party/' only.",
+      "identityName": "id-meyer-party",
+      "identityResourceGroup": "rg-meyer-party",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'meyer-party/' ) )",
+      "conditionVersion": "2.0"
     }
   ]
 }
