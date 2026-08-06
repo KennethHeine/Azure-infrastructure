@@ -230,10 +230,77 @@ pull-requests: write }`. The app contract: an npm project under `app_dir` whose
 `npm run build` emits `<app_dir>/out`. Because the token is fetched at deploy
 time, **the old one-time `AZURE_STATIC_WEB_APPS_API_TOKEN` setup step is gone.**
 
-## Per-repo Azure Container Registry
+## Azure Container Registry — migrating per-repo → shared (in progress)
 
-There is **no shared registry**. Each `container-app` repo provisions **its own
-ACR inside `rg-<repo>`**, declared in the template's `infra/main.bicep`
+**Estate history, in order**: (1) originally one shared ACR in `rg-shared` with
+a constrained RBAC-Admin delegation — abandoned for cross-repo isolation gaps;
+(2) per-repo ACRs, one inside every `rg-<repo>` — the estate's default for most
+of its life; (3) **2026-08-06, Kenneth's explicit cost-driven call**: back to
+one shared ACR (`acrkscloud`, `rg-acr`, `acr/main.bicep`), this time with
+**Entra ABAC repository permissions** (`roleAssignmentMode:
+AbacRepositoryPermissions`) providing the per-repo isolation that made (1) a
+bad idea — each repo's identities hold ABAC-*conditioned* roles that only
+resolve for that repo's own `<repo>/` path. Migrating one repo at a time
+(`inference-lab` first, proven 2026-08-06, isolation-tested for real — see the
+role-grants.json entries below and PR history on that repo); repos not yet
+migrated still use their own per-repo ACR exactly as described further down.
+
+### Shared-ACR access model (opt-in per repo)
+
+A repo opts in with `useSharedAcr: true` in its own `infra/main.parameters.json`
+(template param, controls what the Container App's `registries[]` points at)
+**and** `shared_acr: true` on its `deploy-app.yml`'s call into
+`container-app-deploy-app.yml`. Images are namespaced `<repo>/app[<suffix>]` —
+the `/` boundary is what lets an ABAC condition safely
+`StringStartsWithIgnoreCase '<repo>/'` without risking a substring collision
+against a different repo's name.
+
+Every migrated repo needs **two** `role-grants.json` entries against the
+shared registry's resource ID (cross-RG — the repo's own SP cannot self-grant
+these):
+1. The repo's **CI/deploy SP** (`sp-<repo>-github`, `identityType:
+   "servicePrincipal"`): `Container Registry Repository Contributor`
+   (push+delete — not Writer, which has no delete DataAction and would break
+   the `cleanup` job), ABAC-conditioned to `<repo>/`.
+2. The repo's **runtime pull identity** (`id-<repo>`): `Container Registry
+   Repository Reader`, same `<repo>/` condition.
+
+**Plus a THIRD, unconditioned pair on the CI SP** — discovered empirically
+migrating `inference-lab`, not obvious from the ABAC docs alone, and every
+remaining repo will hit both of these the same way:
+- `Container Registry Data Importer and Data Reader` — the ABAC data-plane
+  roles grant **zero** control-plane `Microsoft.ContainerRegistry/registries/read`,
+  so `az acr import` (the `prime-base-images` job's Docker Hub cache) fails
+  with `"...could not be found in subscription"` — a message that looks
+  nothing like a permissions error. This role is ACR's specific control-plane
+  trigger for `az acr import`, plus a registry-wide PULL-only data grant to
+  verify the import; it structurally cannot carry an ABAC condition (confirmed
+  against the ACR built-in roles directory reference), so this is the
+  permission model's own floor, not a scoping mistake.
+- `Container Registry Tasks Contributor` — control-plane permission to
+  trigger `az acr build` (a Quick Build / ACR Task run) at all. Also
+  registry-wide, also not ABAC-conditionable.
+- Additionally, `az acr build` itself needs `--source-acr-auth-id [caller]`
+  passed on the command line under ABAC (`container-app-deploy-app.yml`
+  handles this automatically when `shared_acr: true`) — without it the run
+  gets all the way to the push and fails with `"when specifying push, at
+  least one credential is required"`, because a Quick Build has zero default
+  data-plane access to its own target registry once ABAC is enabled.
+
+None of the three gaps above touch the actual isolation guarantee — they're
+all either control-plane (registry existence/trigger, not repository content)
+or, for Data Importer, pull-only. The property that matters (a repo's CI
+cannot **write or delete** another repo's images) was isolation-tested for
+real on `inference-lab`: authenticated as its own `sp-inference-lab-github`
+via OIDC, a cross-repo `az acr manifest list-metadata` read got a 404 (ACR
+hides even the existence of a repo you can't see, not just its content), and
+a cross-repo `az acr build` push got `"denied: requested access to the
+resource is denied"` on every retry.
+
+### Per-repo ACR (default until a repo migrates)
+
+Each `container-app` repo not yet migrated provisions **its own ACR inside
+`rg-<repo>`**, declared in the template's `infra/main.bicep`
 (`KennethHeine/template-container-app`), so image push/pull is fully isolated
 per repo.
 
@@ -251,9 +318,9 @@ Access model (least-privilege, all within `rg-<repo>` — no cross-RG grants):
   (images are only ever *added* by deploy runs, so cleanup-on-deploy bounds
   growth). It never deletes anything in use — see the workflow table above.
 
-This replaced an earlier design with a single shared ACR in `rg-shared` plus a
-constrained RBAC-Admin/ABAC delegation; per-repo registries remove the
-cross-repo image isolation gaps and the cross-RG delegation entirely.
+A migrated repo's own ACR is left in place, unused, until every repo is
+confirmed on the shared registry — then all the old per-repo registries are
+deleted in one pass.
 
 ## Entra Easy Auth (container-app repos)
 
