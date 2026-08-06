@@ -68,6 +68,34 @@
       "roles": ["Container Registry Repository Reader"],
       "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'inference-lab/' ) )",
       "conditionVersion": "2.0"
+    },
+    {
+      "comment": "cvr-portal CI/deploy SP (sp-cvr-portal-github): push + cleanup-delete on the shared ACR, ABAC-conditioned to this repo's own 'cvr-portal/' path only. Second repo migrated to the shared registry (2026-08-06), same pattern proven on inference-lab. Contributor, not Writer — cleanup needs delete.",
+      "identityName": "sp-cvr-portal-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Contributor"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/write'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/delete'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/delete'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'cvr-portal/' ) )",
+      "conditionVersion": "2.0"
+    },
+    {
+      "comment": "cvr-portal CI/deploy SP: the two unconditioned control-plane roles every shared-ACR repo needs alongside its ABAC data-plane grant — see Azure-infrastructure/CLAUDE.md 'Azure Container Registry — migrating per-repo to shared' for why (registry name resolution for `az acr import`, and triggering `az acr build` — neither is expressible as an ABAC condition, confirmed against the ACR built-in roles directory reference). Same pair as inference-lab's.",
+      "identityName": "sp-cvr-portal-github",
+      "identityType": "servicePrincipal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Data Importer and Data Reader", "Container Registry Tasks Contributor"]
+    },
+    {
+      "comment": "cvr-portal runtime pull identity (id-cvr-portal, rg-cvr-portal): read-only pull from the shared ACR, ABAC-conditioned to this repo's own 'cvr-portal/' path only.",
+      "identityName": "id-cvr-portal",
+      "identityResourceGroup": "rg-cvr-portal",
+      "scope": "resource",
+      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acrkscloud",
+      "roles": ["Container Registry Repository Reader"],
+      "condition": "( ( !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/content/read'}) AND !(ActionMatches{'Microsoft.ContainerRegistry/registries/repositories/metadata/read'}) ) OR ( @Request[Microsoft.ContainerRegistry/registries/repositories:name] StringStartsWithIgnoreCase 'cvr-portal/' ) )",
+      "conditionVersion": "2.0"
     }
   ]
 }
