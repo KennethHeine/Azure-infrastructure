@@ -10,7 +10,10 @@
     {
       "name": "article-to-speech",
       "template": "container-app",
-      "auth": true
+      "auth": true,
+      "sharedAcr": {
+        "pullIdentities": ["id-articletts"]
+      }
     },
     {
       "name": "kennethheine.com",
@@ -47,12 +50,25 @@
       "name": "agent",
       "template": "container-app",
       "auth": true,
-      "preview": true
+      "preview": true,
+      "sharedAcr": {
+        "pullIdentities": [
+          "id-agent",
+          "id-agent-session",
+          "id-agent-session-business",
+          "id-agent-session-localsys",
+          "id-agent-session-personal"
+        ]
+      }
     },
     {
       "name": "trading-lab",
       "template": "none",
-      "auth": true
+      "auth": true,
+      "sharedAcr": {
+        "pullIdentities": ["id-trading-lab-lane", "id-trading-lab-dashboard"],
+        "cloudBuild": false
+      }
     }
   ]
 }

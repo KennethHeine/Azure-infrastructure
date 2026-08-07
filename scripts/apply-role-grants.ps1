@@ -1,8 +1,17 @@
-# Apply estate-wide RBAC grants from role-grants.json
+# Apply estate-wide RBAC grants — derived (shared ACR) + declared (role-grants.json)
 #
 # Repo-scoped RBAC lives in each repo's own Bicep (its SP is Owner of its RG).
 # Grants that EXCEED a repo's scope cannot be created by the repo's own SP, so
-# they are declared here and applied by the onboarding SP (subscription Owner).
+# they are applied here by the onboarding SP (subscription Owner). Two sources:
+#
+#   * DERIVED  — the shared-ACR grants every container-app repo needs, generated
+#                from repos.json by scripts/derive-acr-grants.ps1. Pure
+#                boilerplate keyed off the repo name, so a newly onboarded repo
+#                gets registry access automatically. That script's header
+#                explains why the repo SP is not given RBAC-admin rights on the
+#                registry to do this for itself.
+#   * DECLARED — role-grants.json, for everything genuinely bespoke.
+#
 # This keeps every cross-RG permission under code control and review. Two scopes:
 #   * subscription — e.g. subscription Reader for the coder-session identity.
 #   * resource     — a single resource OUTSIDE the identity's repo RG, named by
@@ -48,11 +57,7 @@ Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Config file: $ConfigFile"
 
-$grants = (Get-Content $ConfigFile -Raw | ConvertFrom-Json).grants
-if (-not $grants -or $grants.Count -eq 0) {
-    Write-Host "No grants defined in config file. Nothing to do." -ForegroundColor Yellow
-    exit 0
-}
+$declaredGrants = @((Get-Content $ConfigFile -Raw | ConvertFrom-Json).grants)
 
 $subscriptionId = az account show --query id -o tsv
 if ($LASTEXITCODE -ne 0 -or -not $subscriptionId) {
@@ -60,6 +65,30 @@ if ($LASTEXITCODE -ne 0 -or -not $subscriptionId) {
     exit 1
 }
 
+# ─── Derived shared-ACR grants ───────────────────────────────────────
+# Every container-app repo needs the same boilerplate grants on the shared
+# registry, mechanically derived from its name. They are GENERATED from
+# repos.json rather than hand-written here, so onboarding a new repo grants its
+# registry access automatically instead of failing its first deploy-app on a
+# forgotten config entry. See scripts/derive-acr-grants.ps1 — including why the
+# repo's own SP is deliberately NOT allowed to create these itself.
+$derivedGrants = @()
+$deriveScript = Join-Path $PSScriptRoot "derive-acr-grants.ps1"
+if (Test-Path $deriveScript) {
+    $reposConfig = Join-Path (Split-Path $PSScriptRoot -Parent) "repos.json"
+    if (Test-Path $reposConfig) {
+        $derivedGrants = @(& $deriveScript -ConfigFile $reposConfig -SubscriptionId $subscriptionId)
+        Write-Host "Derived:     $($derivedGrants.Count) shared-ACR grant(s) from repos.json" -ForegroundColor Cyan
+    }
+}
+
+$grants = @($derivedGrants) + @($declaredGrants)
+if ($grants.Count -eq 0) {
+    Write-Host "No grants defined. Nothing to do." -ForegroundColor Yellow
+    exit 0
+}
+
+Write-Host "Declared:    $($declaredGrants.Count) grant(s) in $(Split-Path $ConfigFile -Leaf)" -ForegroundColor Cyan
 Write-Host "Grants:      $($grants.Count) to ensure" -ForegroundColor Cyan
 Write-Host ""
 

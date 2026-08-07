@@ -156,6 +156,30 @@ foreach ($repoEntry in $repos) {
     Write-Host ""
 }
 
+# ─── Re-apply RBAC grants now that this run's repos exist ────────────
+# The pass above runs BEFORE the repo loop, so on a brand-new repo's very first
+# onboarding every grant naming sp-<repo>-github was skipped with a warning —
+# that SP is created inside the loop. Running once more here closes that gap in
+# a SINGLE onboarding run: the CI SP now exists, so its shared-ACR push grants
+# land immediately and the repo's first deploy-app can push.
+#
+# The repo's runtime pull identity still cannot be granted yet — it does not
+# exist until the repo's own deploy-infra has run — so that one grant still
+# needs a re-run of this workflow afterwards. That is unchanged and is why the
+# skip is a warning, not a failure.
+#
+# Idempotent: the second pass re-checks every assignment and skips the ones the
+# first pass already made, so this costs a handful of reads, not duplicate work.
+if (Test-Path $applyRoleGrants) {
+    Write-Host "Re-applying RBAC grants (repos created in this run now exist)..." -ForegroundColor Cyan
+    & $applyRoleGrants
+    if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+        Write-Host "Error: Role grant application failed." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ""
+}
+
 # ─── Summary ─────────────────────────────────────────────────────────
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Processing Complete" -ForegroundColor Cyan

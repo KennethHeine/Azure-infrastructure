@@ -52,6 +52,27 @@ opts the repo into **per-branch preview environments** (see that section below).
 Schema: `repos.schema.json`. Onboarding is **idempotent** — re-running never
 duplicates resources.
 
+**`sharedAcr`** (optional) controls the shared-registry grants derived for the
+repo by `scripts/derive-acr-grants.ps1`. Omit it and you get the right thing:
+enabled for `container-app`, disabled for everything else, with the pull
+identity assumed to be `id-<repo>`. Set `false` to derive nothing, or an object
+to override:
+
+```jsonc
+{ "name": "article-to-speech", "template": "container-app", "auth": true,
+  // the template names the identity after appName, not the repo
+  "sharedAcr": { "pullIdentities": ["id-articletts"] } },
+
+{ "name": "trading-lab", "template": "none", "auth": true,
+  // several pull identities; builds with docker, so it needs no
+  // az acr build / az acr import control-plane roles
+  "sharedAcr": { "pullIdentities": ["id-trading-lab-lane", "id-trading-lab-dashboard"],
+                 "cloudBuild": false } }
+```
+
+Add a repo here and its registry access is created for you — see the shared-ACR
+section for what gets emitted and why the repo can't grant itself.
+
 ## Config: `providers.json`
 
 The subscription-level **resource providers** the estate needs (Container Apps,
@@ -73,11 +94,25 @@ starts using a new Azure resource type. Schema: `providers.schema.json`.
 
 Estate-wide **RBAC grants that exceed a single repo's resource-group scope**.
 Repo-scoped RBAC belongs in each repo's own Bicep (its SP is Owner of its RG);
-grants a repo SP can't make itself are declared here and applied by the
-onboarding SP (subscription Owner) via `scripts/apply-role-grants.ps1` —
-`process-repos.ps1` runs it right after provider registration. Idempotent; an
-identity whose repo hasn't deployed yet is a warning, not a failure (re-run
-**Onboard Repositories** after that repo's infra deploy). Schema:
+grants a repo SP can't make itself are applied by the onboarding SP
+(subscription Owner) via `scripts/apply-role-grants.ps1`. That script applies
+**two** sources:
+
+| Source | What | Where it comes from |
+|--------|------|---------------------|
+| **Derived** | The shared-ACR grants every container-app repo needs | Generated from `repos.json` by `scripts/derive-acr-grants.ps1` — pure boilerplate keyed off the repo name, so a new repo gets registry access with **zero** config |
+| **Declared** | Everything genuinely bespoke | `role-grants.json` (this file) |
+
+Keep `role-grants.json` for the bespoke cases only. If you find yourself writing
+a grant whose every field is a function of the repo name, it belongs in the
+derivation instead.
+
+`process-repos.ps1` applies grants **twice**: once before the repo loop, and
+again after it — the second pass is what lets a brand-new repo's `sp-<repo>-github`
+grants land in the *same* onboarding run, since that SP is created inside the
+loop. Idempotent; an identity whose repo hasn't deployed yet is a warning, not a
+failure (a repo's runtime `id-<repo>` still needs one re-run of **Onboard
+Repositories** after its first infra deploy). Schema:
 `role-grants.schema.json`. Two `scope`s: `subscription`, or `resource` (a
 single resource OUTSIDE the identity's repo RG, named by `scopeResourceId`).
 
@@ -278,27 +313,41 @@ the `/` boundary is what lets an ABAC condition safely
 `StringStartsWithIgnoreCase '<repo>/'` without risking a substring collision
 against a different repo's name.
 
-Every migrated repo needs **two** `role-grants.json` entries against the
-shared registry's resource ID (cross-RG — the repo's own SP cannot self-grant
-these):
-1. The repo's **CI/deploy SP** (`sp-<repo>-github`, `identityType:
-   "servicePrincipal"`): `Container Registry Repository Contributor`
-   (push+delete — not Writer, which has no delete DataAction and would break
-   the `cleanup` job), ABAC-conditioned to `<repo>/`.
-2. The repo's **runtime pull identity** (`id-<repo>`): `Container Registry
+**These grants are DERIVED, not hand-written.** They are pure boilerplate keyed
+off the repo name, so `scripts/derive-acr-grants.ps1` generates them from
+`repos.json` and `apply-role-grants.ps1` applies them alongside the declared
+ones. **Onboarding a new container-app repo grants its registry access
+automatically — there is nothing to add to `role-grants.json`.** Per repo, per
+environment (prod, plus preview if `"preview": true`), it emits:
+
+1. The repo's **CI/deploy SP** (`sp-<repo>-github`): `Container Registry
+   Repository Contributor` (push+delete — not Writer, which has no delete
+   DataAction and would break the `cleanup` job), ABAC-conditioned to `<repo>/`.
+2. The same SP: the unconditioned control-plane pair described below.
+3. Each **runtime pull identity** (default `id-<repo>`): `Container Registry
    Repository Reader`, same `<repo>/` condition.
 
-> **Onboarding a NEW container-app repo — do not skip this.** The template now
-> ships `useSharedAcr: true`, so a new repo targets `acrkscloud` from its very
-> first deploy — but **nothing grants it access automatically**. Its `deploy-app`
-> will fail at the build/push until you add its entries to `role-grants.json`
-> and re-run **Onboard Repositories**. Copy an existing repo's three entries
-> (search `role-grants.json` for `sp-inference-lab-github` — it's the reference
-> pair, plus `id-inference-lab` for the pull side) and substitute the repo name
-> in `identityName`, `identityResourceGroup`, the `comment`, and **both**
-> `StringStartsWithIgnoreCase '<repo>/'` occurrences inside `condition`. This is
-> the same two-pass flow every cross-RG grant already uses ("an identity whose
-> repo hasn't deployed yet is a warning, not a failure").
+Override the defaults with `sharedAcr` in `repos.json` (see that section) —
+needed only when the runtime identity isn't named after the repo, when a repo
+has several, or when a repo doesn't cloud-build.
+
+> **Why the repo's own SP is not allowed to create these itself.** The tempting
+> shortcut is to give each repo SP User Access Administrator (or a constrained
+> *Role Based Access Control Administrator*) on `acrkscloud` and let the repo's
+> own template Bicep declare its grants. **That silently removes the isolation
+> the shared registry depends on.** Azure's constrained role-assignment
+> delegation can restrict *which role* is assigned and *to which principal*, but
+> there is **no attribute for the ABAC condition** on the assignment being
+> created — the available Request attributes are role definition id and
+> principal type/id, [and nothing else](https://learn.microsoft.com/azure/role-based-access-control/conditions-authorization-actions-attributes).
+> So a repo SP permitted to assign `Container Registry Repository Contributor`
+> can assign it **to itself with no condition**: unconditioned write+delete over
+> every other repo's images. Plain User Access Administrator is strictly worse —
+> it can also assign User Access Administrator. This estate already made this
+> mistake once: era (1) above was exactly "a constrained RBAC-Admin delegation —
+> abandoned for cross-repo isolation gaps". Deriving in the control plane keeps
+> these where every other cross-RG grant lives, created by the onboarding SP
+> that is subscription Owner anyway, so **no new privilege is introduced**.
 
 **Plus a THIRD, unconditioned pair on the CI SP** — discovered empirically
 migrating `inference-lab`, not obvious from the ABAC docs alone, and every
