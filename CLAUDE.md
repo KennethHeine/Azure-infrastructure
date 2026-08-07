@@ -2,8 +2,9 @@
 
 This repository is the **control plane** for Kenneth's Azure + GitHub estate. It
 onboards new application repositories, provisions their isolated Azure footprint
-(each repo gets its own resource group and, for container apps, its own
-registry), and provides one-click workflows to add or decommission repos.
+(each repo gets its own resource group; container apps share one estate-wide
+registry, isolated by Entra ABAC repository permissions), and provides one-click
+workflows to add or decommission repos.
 Everything is OIDC / managed-identity based — **no Azure passwords or client
 secrets are stored anywhere.**
 
@@ -155,7 +156,7 @@ Current grants (`graph-grants.json` is the truth — this list is a summary):
 
 | Template | Repo | What you get |
 |----------|------|--------------|
-| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, **its own per-repo ACR** with image pull via a user-assigned managed identity granted AcrPull (all declared in the template's Bicep, in `rg-<repo>`), secret-less **Entra Easy Auth** (default on), optional **custom domain** (managed cert), `deploy-infra` + `deploy-app` workflows that are **thin callers of the reusable workflows below**. `deploy-app` builds the image with **`az acr build`** (cloud build) and updates the app. |
+| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App, **scale-to-zero**, Log Analytics, image pull from the **estate-wide shared ACR** (`acrkscloud`) via a user-assigned managed identity holding an ABAC-conditioned `Container Registry Repository Reader` grant, secret-less **Entra Easy Auth** (default on), optional **custom domain** (managed cert), `deploy-infra` + `deploy-app` workflows that are **thin callers of the reusable workflows below**. `deploy-app` builds the image with **`az acr build`** (cloud build) and updates the app. |
 | `static-web` | [`KennethHeine/template-static-web`](https://github.com/KennethHeine/template-static-web) | Next.js static export → **Azure Static Web Apps**, open/public, `deploy-infra` + `deploy` (prod + PR preview) workflows that are **thin callers of the reusable workflows below**. The SWA deployment token is **fetched at deploy time via OIDC** — no stored secret, no manual onboarding step. |
 
 New repos are created with `gh repo create --template`. Templated repos keep
@@ -170,7 +171,7 @@ into each one:
 | Reusable workflow | What it does |
 |-------------------|--------------|
 | `.github/workflows/container-app-deploy-infra.yml` | Deploys the repo's `infra/main.bicep` (image-preservation on re-deploy, optional custom-domain hostname registration → bind, post-deploy re-auth, conditional Easy-Auth CLI pre-authorization). |
-| `.github/workflows/container-app-deploy-app.yml` | Builds images with **`az acr build`** (cloud build — no Docker on the runner) and points the Container App at the new image. `setup` → `build-app` ‖ `build-extra` (matrix, parallel) → `deploy` → `cleanup`. Input `extra_images` (JSON `[{suffix,dockerfile,context}]`) builds extra images, e.g. a sidecar/runner image, each as its own parallel job. The `cleanup` job prunes stale images from the repo's ACR after every successful deploy (Basic SKU has only 10 GiB included); it keeps everything referenced by active Container App revisions / ACI groups / Container Apps jobs in the RG, `latest`, the newest `image_retention_count` (default 5) tagged manifests per repository, any non-git-sha tag, multi-arch index children, and anything < 24 h old — and aborts without deleting if the in-use query fails. Cleanup failure never fails the deploy run (`continue-on-error`). |
+| `.github/workflows/container-app-deploy-app.yml` | Builds images with **`az acr build`** (cloud build — no Docker on the runner) and points the Container App at the new image. `setup` → `build-app` ‖ `build-extra` (matrix, parallel) → `deploy` → `cleanup`. Input `extra_images` (JSON `[{suffix,dockerfile,context}]`) builds extra images, e.g. a sidecar/runner image, each as its own parallel job. The `cleanup` job prunes the repo's own `<repo>/` images from the shared ACR after every successful deploy (Basic SKU includes 10 GiB, and this is the only thing bounding its growth); it keeps everything referenced by active Container App revisions / ACI groups / Container Apps jobs in the RG, `latest`, the newest `image_retention_count` (default 5) tagged manifests per repository, any non-git-sha tag, multi-arch index children, and anything < 24 h old — and aborts without deleting if the in-use query fails. Cleanup failure never fails the deploy run (`continue-on-error`). |
 
 Each container-app repo keeps only **thin callers** (`deploy-infra.yml` /
 `deploy-app.yml`) that `uses:` these `@main` with `secrets: inherit`:
@@ -230,7 +231,7 @@ pull-requests: write }`. The app contract: an npm project under `app_dir` whose
 `npm run build` emits `<app_dir>/out`. Because the token is fetched at deploy
 time, **the old one-time `AZURE_STATIC_WEB_APPS_API_TOKEN` setup step is gone.**
 
-## Azure Container Registry — migrating per-repo → shared (in progress)
+## Azure Container Registry — one shared registry (`acrkscloud`)
 
 **Estate history, in order**: (1) originally one shared ACR in `rg-shared` with
 a constrained RBAC-Admin delegation — abandoned for cross-repo isolation gaps;
@@ -240,17 +241,39 @@ one shared ACR (`acrkscloud`, `rg-acr`, `acr/main.bicep`), this time with
 **Entra ABAC repository permissions** (`roleAssignmentMode:
 AbacRepositoryPermissions`) providing the per-repo isolation that made (1) a
 bad idea — each repo's identities hold ABAC-*conditioned* roles that only
-resolve for that repo's own `<repo>/` path. Migrating one repo at a time
-(`inference-lab` first, proven 2026-08-06, isolation-tested for real — see the
-role-grants.json entries below and PR history on that repo); repos not yet
-migrated still use their own per-repo ACR exactly as described further down.
+resolve for that repo's own `<repo>/` path. Migrated one repo at a time
+(`inference-lab` first, isolation-tested for real — see the role-grants.json
+entries below and PR history on that repo).
 
-### Shared-ACR access model (opt-in per repo)
+**The migration is COMPLETE.** All nine container-app repos are on the shared
+registry, and all nine per-repo registries were deleted 2026-08-06. `acrkscloud`
+is the only container registry in the subscription. The registry is **Basic**
+SKU (2026-08-07): Basic and Standard have identical data-plane rate limits and
+both fully support ABAC repository permissions — the only differences that reach
+this estate are included storage (10 vs 100 GiB) and webhooks (2 vs 10, of which
+we use zero), and Basic stays cheaper than Standard until ~158 GB stored.
 
-A repo opts in with `useSharedAcr: true` in its own `infra/main.parameters.json`
-(template param, controls what the Container App's `registries[]` points at)
-**and** `shared_acr: true` on its `deploy-app.yml`'s call into
-`container-app-deploy-app.yml`. Images are namespaced `<repo>/app[<suffix>]` —
+**Two things this changed that are easy to miss:**
+
+- **Under ABAC, control-plane roles grant NO data-plane access** — subscription
+  Owner cannot even list repositories (`az acr repository list` returns
+  `401 UNAUTHORIZED … Name:"catalog"`). `acr/main.bicep` therefore grants the
+  unconditioned `Container Registry Repository Catalog Lister` to the onboarding
+  SP (so decommission can enumerate) and to the operators in
+  `acr/main.bicepparam` (so the registry can be audited at all). Repo identities
+  never get it — they stay path-scoped.
+- **A repo's images now outlive its resource group.** They used to die with
+  `rg-<repo>`; now they sit in `acrkscloud` under `<repo>/`. Decommission has to
+  delete them explicitly — see `decommission-repo.ps1` Step 3d.
+
+### Shared-ACR access model (the default for every repo)
+
+A repo is on the shared registry when it has `useSharedAcr: true` in its own
+`infra/main.parameters.json` (template param, controls what the Container App's
+`registries[]` points at) **and** `shared_acr: true` on its `deploy-app.yml`'s
+call into `container-app-deploy-app.yml`. Both are set on every repo and in the
+`container-app` template, so **new repos get this automatically** — the toggle
+now exists only as a rollback hatch. Images are namespaced `<repo>/app[<suffix>]` —
 the `/` boundary is what lets an ABAC condition safely
 `StringStartsWithIgnoreCase '<repo>/'` without risking a substring collision
 against a different repo's name.
@@ -265,9 +288,21 @@ these):
 2. The repo's **runtime pull identity** (`id-<repo>`): `Container Registry
    Repository Reader`, same `<repo>/` condition.
 
+> **Onboarding a NEW container-app repo — do not skip this.** The template now
+> ships `useSharedAcr: true`, so a new repo targets `acrkscloud` from its very
+> first deploy — but **nothing grants it access automatically**. Its `deploy-app`
+> will fail at the build/push until you add its entries to `role-grants.json`
+> and re-run **Onboard Repositories**. Copy an existing repo's three entries
+> (search `role-grants.json` for `sp-inference-lab-github` — it's the reference
+> pair, plus `id-inference-lab` for the pull side) and substitute the repo name
+> in `identityName`, `identityResourceGroup`, the `comment`, and **both**
+> `StringStartsWithIgnoreCase '<repo>/'` occurrences inside `condition`. This is
+> the same two-pass flow every cross-RG grant already uses ("an identity whose
+> repo hasn't deployed yet is a warning, not a failure").
+
 **Plus a THIRD, unconditioned pair on the CI SP** — discovered empirically
 migrating `inference-lab`, not obvious from the ABAC docs alone, and every
-remaining repo will hit both of these the same way:
+repo needs both of these the same way:
 - `Container Registry Data Importer and Data Reader` — the ABAC data-plane
   roles grant **zero** control-plane `Microsoft.ContainerRegistry/registries/read`,
   so `az acr import` (the `prime-base-images` job's Docker Hub cache) fails
@@ -297,30 +332,27 @@ hides even the existence of a repo you can't see, not just its content), and
 a cross-repo `az acr build` push got `"denied: requested access to the
 resource is denied"` on every retry.
 
-### Per-repo ACR (default until a repo migrates)
+### Per-repo ACR (rollback hatch only — nothing uses it)
 
-Each `container-app` repo not yet migrated provisions **its own ACR inside
-`rg-<repo>`**, declared in the template's `infra/main.bicep`
-(`KennethHeine/template-container-app`), so image push/pull is fully isolated
-per repo.
+Every repo's `infra/main.bicep` still carries the `useSharedAcr` toggle whose
+**false** branch declares a per-repo ACR inside `rg-<repo>`. That was the
+estate's default until 2026-08-06; today it is dead in practice — no registry
+exists to fall back to, and a rollback would mean rebuilding images into a fresh
+one.
 
-Access model (least-privilege, all within `rg-<repo>` — no cross-RG grants):
-- The repo's SP is **Owner of `rg-<repo>`**, so it can create the ACR and build/push
-  images (via `az acr build` — cloud build) with no extra role assignment.
-- The Container App pulls with a **user-assigned managed identity** granted
-  **AcrPull** on that ACR. The identity, the ACR, and the AcrPull role
-  assignment are all created declaratively in the template's Bicep (the SP can
-  assign roles in its own RG, so no imperative pre-step is needed).
-- ACR has **admin user disabled** — identity-based access only, no secrets.
-- **Image lifecycle**: registries are Basic SKU (10 GiB included) and ACR
-  retention policies are Premium-only, so the reusable `deploy-app` workflow's
-  `cleanup` job prunes stale manifests after every successful deploy instead
-  (images are only ever *added* by deploy runs, so cleanup-on-deploy bounds
-  growth). It never deletes anything in use — see the workflow table above.
+**The ACR resource is `if (!useSharedAcr)`-guarded — keep it that way.** Until
+2026-08-07 only the *role assignment* was guarded while the registry itself was
+unconditional, so every `deploy-infra` run silently recreated the per-repo ACR
+(the activity log caught it doing exactly that at `2026-08-06T12:37:00Z` on
+`rg-agent`). It hadn't cost anything only because the deletions happened after
+the last infra deploy. If you ever touch this block, the guard is the point.
 
-A migrated repo's own ACR is left in place, unused, until every repo is
-confirmed on the shared registry — then all the old per-repo registries are
-deleted in one pass.
+**Image lifecycle**: ACR retention policies are Premium-only, so the reusable
+`deploy-app` workflow's `cleanup` job prunes stale manifests after every
+successful deploy instead (images are only ever *added* by deploy runs, so
+cleanup-on-deploy bounds growth). It never deletes anything in use — see the
+workflow table above. This is what keeps the shared registry near Basic's
+10 GiB included allowance.
 
 ## Entra Easy Auth (container-app repos)
 
@@ -399,25 +431,26 @@ job is skipped on non-`main`. So **push a `test/**` branch → preview; `main` �
 deploy-app concurrency is keyed per `github.ref` so prod and preview deploys
 never cancel each other.
 
-**Base-split + preview ACR (a trap this pattern can hit, not a step every repo
-needs).** claude-runner's slim Dockerfiles `FROM` its own base images, so its
-fresh (empty) preview ACR couldn't resolve them and `prime-base-images` couldn't
+**Base-split (a trap this pattern hit while previews had their own registry).**
+claude-runner's slim Dockerfiles `FROM` its own base images, so its fresh
+(empty) preview ACR couldn't resolve them and `prime-base-images` couldn't
 import internal `*-base` tags from Docker Hub — its `build-base-images.yml` grew
-a dedicated **`preview-seed`** job (as the preview SP, gated on
-`RESOURCE_GROUP_PREVIEW`) to build the bases into the preview ACR too. `agent`
-has an analogous base-split (`session-base.Dockerfile`/`broker-base.Dockerfile`)
-but its `test/**` preview deploys have succeeded repeatedly with no equivalent
-job — so either its base-image resolution doesn't hit the same gap, or it's
-tolerating slower/failed-then-retried preview builds; **not independently
-verified**, flagging rather than asserting. If a future preview-opted repo's
-slim Dockerfiles FROM its own internal base images, check this first.
+a dedicated **`preview-seed`** job to build the bases into the preview ACR too.
+Since consolidation this specific gap is mostly closed: preview builds into the
+same `acrkscloud` as prod (under its own `<repo>-preview/` prefix), so shared
+root-level base-image caches are already there. Preview still cannot read
+prod's `<repo>/` path, so a base image published only under `<repo>/` remains
+unreachable from preview — if a preview-opted repo's slim Dockerfiles `FROM`
+its own internal base images, check this first.
 
-**Cost.** Compute scales to zero; the only standing cost is the preview ACR
-(~$5/mo Basic). Infra is kept standing (no idle teardown) for fast feedback — a
-test iteration runs only `deploy-app` (~1-2 min), not `deploy-infra`. The
-per-deploy `cleanup` job prunes the preview ACR's image tags like prod's.
-`decommission-repo.ps1` (Step 3c) tears the whole preview footprint down with the
-repo. Full design + history: `PLAN-preview-env.md`.
+**Cost.** Compute scales to zero and the preview registry is gone — previews now
+share `acrkscloud`, so a preview environment's standing cost is **effectively
+zero** (just its slice of image storage). Infra is kept standing (no idle
+teardown) for fast feedback — a test iteration runs only `deploy-app` (~1-2 min),
+not `deploy-infra`. The per-deploy `cleanup` job prunes the `<repo>-preview/`
+images like prod's. `decommission-repo.ps1` tears the whole preview footprint
+down with the repo (Step 3c), including its shared-registry images and grants
+(Step 3d). Full design + history: `PLAN-preview-env.md`.
 
 ## Operating it
 
@@ -432,11 +465,15 @@ push triggers onboarding). Then watch **Onboard Repositories**.
 
 ### Decommission a repo
 Run **Decommission Repo** (`decommission-repo.yml`) — you must type the repo name
-into `confirm`. It removes the repos.json entry and deletes `rg-<repo>` (which
-includes the repo's own ACR + images), the SP, **any Entra apps the SP owns
-(e.g. the Easy Auth app)**, **the preview footprint if any (`sp-<repo>-preview-github`
-+ `rg-<repo>-preview`, Step 3c)**, and — per the `github_repo` input — **keeps**,
-**archives** (read-only), or **deletes** the GitHub repo.
+into `confirm`. It removes the repo's entries from **`repos.json`,
+`role-grants.json` and `graph-grants.json`** (one atomic commit — the grant
+appliers are additive and would otherwise re-grant on a same-name re-onboard),
+and deletes `rg-<repo>`, the SP, **any Entra apps the SP owns (e.g. the Easy
+Auth app)**, **the preview footprint if any (`sp-<repo>-preview-github` +
+`rg-<repo>-preview`, Step 3c)**, **its images + ABAC role assignments on the
+shared registry `acrkscloud` (Step 3d — these no longer die with the RG)**, and
+— per the `github_repo` input — **keeps**, **archives** (read-only), or
+**deletes** the GitHub repo.
 
 ### Manually
 `pwsh ./scripts/process-repos.ps1 -ConfigFile ./repos.json` (needs `az login` +
@@ -526,7 +563,8 @@ URL, validates, writes the secret, optionally re-runs onboarding).
 |----------|---------|---------|
 | `onboard-repos.yml` | push to `repos.json`, `role-grants.json` or `graph-grants.json` on main, manual | Provision/refresh all repos; apply estate-wide RBAC + Graph grants |
 | `add-repo.yml` | manual (inputs) | Add an entry to repos.json → triggers onboarding |
-| `decommission-repo.yml` | manual (inputs + confirm) | Full teardown of one repo |
+| `decommission-repo.yml` | manual (inputs + confirm) | Full teardown of one repo (incl. its images + grants on the shared ACR, and its entries in the grant configs) |
+| `acr-deploy.yml` | push to `acr/**` on main, manual | Deploy the estate-wide shared registry `acrkscloud` (creates `rg-acr`) from `acr/main.bicepparam` |
 | `dns-deploy.yml` | push to `dns/**`, manual | Deploy the kscloud.io DNS zone (creates `rg-dns`); applies the union of `dns/records.platform.json` + `dns/records.app.json` then prunes stale records |
 | `add-dns-record.yml` | manual (inputs) | Upsert an app record in `dns/records.app.json` → triggers Deploy DNS Zone |
 | `remove-dns-record.yml` | manual (inputs) | Remove an app record from `dns/records.app.json` → triggers Deploy DNS Zone |
@@ -616,9 +654,9 @@ role. Re-run that script if these need to be (re)granted.
 
 - **Bicep only**, deployed via GitHub Actions — never create Azure resources by
   hand or with ad-hoc CLI in the portal.
-- Keep everything **idempotent** and **scoped** (per-repo resources — including
-  each container-app repo's own ACR — live in `rg-<repo>`; estate-wide things
-  like the DNS zone live in their own RG, e.g. `rg-dns`).
+- Keep everything **idempotent** and **scoped** (per-repo resources live in
+  `rg-<repo>`; estate-wide singletons live in their own RG — the DNS zone in
+  `rg-dns`, the shared container registry in `rg-acr`).
 - **No stored credentials** — OIDC federated identity for CI, managed identities
   for runtime.
 - PowerShell scripts target **pwsh 7+**; validate edits with
@@ -627,6 +665,6 @@ role. Re-run that script if these need to be (re)granted.
   the Add/Decommission workflows rather than an existing one.
 - **Base images through ACR**: container-app Dockerfiles should declare
   `ARG ACR_LOGIN_SERVER=docker.io` and `FROM ${ACR_LOGIN_SERVER}/<path>:<tag>`
-  — the reusable deploy-app workflow injects the repo ACR's login server and
+  — the reusable deploy-app workflow injects the shared ACR's login server and
   lazily imports/refreshes the base image (Docker Hub anonymous pulls 429
   under ACR's shared egress IP; anonymous cache *rules* are blocked by Azure).
