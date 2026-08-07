@@ -142,7 +142,12 @@ foreach ($entry in $config.repos) {
     else { $enabled = ($template -eq 'container-app') }
     if (-not $enabled) { continue }
 
-    $pullIdentities = if ($sharedAcr -and $sharedAcr.pullIdentities) { @($sharedAcr.pullIdentities) } else { @("id-$name") }
+    # Distinguish "key absent" (use the default) from an explicit empty array
+    # (this repo genuinely has no runtime pull identity — e.g. its images are
+    # only ever run by Container Apps Jobs declared elsewhere). Testing the value
+    # for truthiness would collapse those two cases, and silently deriving a
+    # grant for a nonexistent id-<repo> just produces a confusing warning.
+    $pullIdentities = if ($sharedAcr -and $null -ne $sharedAcr.pullIdentities) { @($sharedAcr.pullIdentities) } else { @("id-$name") }
     $cloudBuild = if ($sharedAcr -and $null -ne $sharedAcr.cloudBuild) { [bool]$sharedAcr.cloudBuild } else { $true }
 
     # Prod, plus an isolated preview environment when the repo opted into one.
@@ -197,4 +202,8 @@ foreach ($entry in $config.repos) {
     }
 }
 
-, $derived.ToArray()
+# Emit the grants one per pipeline object. Do NOT comma-wrap the array to guard
+# against single-element unrolling: the caller already collects with @(...), and
+# `@(& thisScript)` around a comma-wrapped array yields ONE element (the inner
+# array) instead of N grants — which silently made the whole derivation a no-op.
+$derived.ToArray()
