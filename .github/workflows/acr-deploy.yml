@@ -38,8 +38,10 @@ jobs:
         run: |
           set -euo pipefail
           az group create --name "$RESOURCE_GROUP" --location "$LOCATION" --only-show-errors >/dev/null
+          # The .bicepparam carries its own `using './main.bicep'`, so it
+          # replaces --template-file rather than accompanying it.
           az deployment group create \
             --resource-group "$RESOURCE_GROUP" \
             --name "acr-${{ github.run_number }}" \
-            --template-file ./acr/main.bicep \
+            --parameters ./acr/main.bicepparam \
             --only-show-errors

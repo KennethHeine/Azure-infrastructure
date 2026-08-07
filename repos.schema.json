@@ -45,6 +45,31 @@
                 "type": "boolean",
                 "default": false,
                 "description": "Create a per-branch preview environment: an isolated rg-<name>-preview + sp-<name>-preview-github (Owner of that RG only, federated to any branch) so non-main branches can deploy to a sandbox, never to prod. Default false."
+              },
+              "sharedAcr": {
+                "description": "Shared-registry access for this repo, applied by scripts/derive-acr-grants.ps1 (via apply-role-grants.ps1). Omit to use the default: enabled for template 'container-app', disabled otherwise. Set false to never derive grants; true to enable with defaults; or an object to override them.",
+                "oneOf": [
+                  {
+                    "type": "boolean",
+                    "description": "true = enable with defaults; false = derive no shared-ACR grants for this repo."
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "pullIdentities": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Runtime managed identities that pull images, each granted ABAC-conditioned 'Container Registry Repository Reader' on this repo's '<name>/' path (and '<name>-preview/' when preview is true). Default [\"id-<name>\"]. Override when the app's identity is not named after the repo — the container-app template derives it from appName, so article-to-speech uses id-articletts — or when a repo has several (trading-lab, agent)."
+                      },
+                      "cloudBuild": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Whether this repo's CI SP also gets the two UNCONDITIONED control-plane roles that 'az acr build' and 'az acr import' require (Container Registry Tasks Contributor, Container Registry Data Importer and Data Reader). Neither can carry an ABAC condition. Set false for a repo that builds with docker and only pushes via 'az acr login', so it is not granted registry-wide capabilities it never uses."
+                      }
+                    }
+                  }
+                ]
               }
             }
           }

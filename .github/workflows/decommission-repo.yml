@@ -53,7 +53,7 @@ jobs:
         with:
           token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
 
-      - name: Remove entry from repos.json
+      - name: Remove entries from repos.json + grant configs
         shell: bash
         env:
           NAME: ${{ inputs.name }}
@@ -63,13 +63,43 @@ jobs:
             .repos |= map(select((if type=="string" then . else .name end) != $name))
           ' repos.json > repos.tmp
           mv repos.tmp repos.json
+
+          # Also drop the repo's estate-wide grants. apply-role-grants.ps1 and
+          # apply-graph-grants.ps1 are ADDITIVE — they never revoke — so leaving
+          # a decommissioned repo's entries here would re-grant them the moment
+          # a same-named repo is re-onboarded, and meanwhile they describe
+          # identities that no longer exist. (The live assignments themselves are
+          # removed by decommission-repo.ps1 Step 3d.)
+          #
+          # Match how the estate names things: a repo owns the identities in
+          # rg-<name> / rg-<name>-preview, and the SPs sp-<name>-github /
+          # sp-<name>-preview-github.
+          for f in role-grants.json graph-grants.json; do
+            [ -f "$f" ] || continue
+            jq \
+              --arg rg        "rg-$NAME" \
+              --arg rgPreview "rg-$NAME-preview" \
+              --arg sp        "sp-$NAME-github" \
+              --arg spPreview "sp-$NAME-preview-github" '
+              .grants |= map(select(
+                (.identityResourceGroup // "") != $rg
+                and (.identityResourceGroup // "") != $rgPreview
+                and (.identityName // "") != $sp
+                and (.identityName // "") != $spPreview
+              ))
+            ' "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+          done
+
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add repos.json
+          # One atomic commit — this repo's own guidance is that concurrent
+          # pushes to main lose changes, so never split these into two pushes.
+          git add repos.json role-grants.json graph-grants.json
           if git diff --cached --quiet; then
-            echo "::notice::'$NAME' was not in repos.json."
+            echo "::notice::'$NAME' was not in repos.json or the grant configs."
           else
-            git commit -m "Decommission '$NAME': remove from repos list"
+            git commit -m "Decommission '$NAME': remove from repos list + grant configs"
             git push
           fi
 

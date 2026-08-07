@@ -8,11 +8,16 @@
 #   3. Tears down the preview environment too if the repo had one
 #      ("preview": true): sp-<repo>-preview-github (+ its Easy Auth app) and
 #      rg-<repo>-preview (Step 3c).
-#   4. (Optional) Archives (read-only) or deletes the GitHub repository
+#   4. Purges the repo's images + ABAC role assignments from the estate-wide
+#      shared registry acrkscloud (Step 3d).
+#   5. (Optional) Archives (read-only) or deletes the GitHub repository
 #
-# The repo's container registry now lives inside rg-<repo>, so it (and its
-# images) are removed when the resource group is deleted — no shared-registry
-# cleanup is needed.
+# The repo's container images used to live in an ACR inside rg-<repo> and died
+# with the resource group. Since the 2026-08-06 consolidation they live in the
+# shared acrkscloud (rg-acr) under a '<repo>/' prefix, and the repo's registry
+# grants are role assignments on THAT registry — so both now outlive the
+# resource group and have to be cleaned up explicitly (Step 3d), or the repo
+# keeps costing storage after it's gone.
 #
 # Removing the entry from repos.json is handled by the decommission workflow,
 # not this script.
@@ -70,6 +75,34 @@ $global:LASTEXITCODE = 0
 # Resolve the SP appId (may already be gone on a re-run).
 $appId = az ad app list --display-name $ServicePrincipalName --query "[0].appId" --output tsv --only-show-errors
 $global:LASTEXITCODE = 0
+
+# ─── Step 0: Capture the principals holding grants on the shared ACR ─
+# Since the registry consolidation (2026-08-06) a repo's images and its
+# registry role assignments no longer live inside rg-<repo> — they're in the
+# estate-wide acrkscloud (rg-acr) — so neither deleting the SP (Step 2) nor
+# deleting the resource groups (Steps 3/3c) cleans them up. Step 3d does, but
+# it needs the principal ids, and by then the objects that carry them are gone:
+# a UAMI's principalId is unrecoverable once its resource group is deleted.
+# So collect them here, first, while everything still exists.
+$sharedAcrName = "acrkscloud"
+$sharedAcrPrincipalIds = @()
+
+foreach ($spName in @($ServicePrincipalName, "sp-$GitHubRepo-preview-github")) {
+    $objId = az ad sp list --display-name $spName --query "[0].id" --output tsv --only-show-errors
+    if ($objId) { $sharedAcrPrincipalIds += $objId }
+    $global:LASTEXITCODE = 0
+}
+foreach ($rg in @($ResourceGroupName, "rg-$GitHubRepo-preview")) {
+    if ((az group exists --name $rg --only-show-errors) -eq "true") {
+        foreach ($id in @(az identity list -g $rg --query "[].principalId" --output tsv --only-show-errors)) {
+            if ($id) { $sharedAcrPrincipalIds += $id }
+        }
+    }
+    $global:LASTEXITCODE = 0
+}
+$sharedAcrPrincipalIds = @($sharedAcrPrincipalIds | Sort-Object -Unique)
+Write-Host "Step 0: Captured $($sharedAcrPrincipalIds.Count) principal(s) that may hold grants on '$sharedAcrName'" -ForegroundColor Cyan
+Write-Host ""
 
 # ─── Step 1: Delete Entra apps owned by the SP (e.g. Easy Auth app) ──
 # Container-app repos with auth create their own Entra "Easy Auth" application
@@ -322,6 +355,82 @@ if ($previewAppId -or $previewRgExists -eq "true") {
     Write-Host ""
 }
 
+# ─── Step 3d: Purge this repo from the estate-wide shared ACR ────────
+# Before the 2026-08-06 consolidation each repo's registry lived inside
+# rg-<repo> and died with it. Now every repo's images sit in the shared
+# acrkscloud under a '<repo>/' prefix, and its ABAC role assignments are on
+# that registry — neither is touched by deleting the SP or the resource groups.
+# Without this step a decommissioned repo keeps paying for image storage
+# indefinitely and leaves orphaned role assignments behind.
+#
+# Prefix matching is exact-with-slash on purpose: '<repo>/' cannot match
+# '<repo>-preview/' (which gets its own entry, mirroring how deploy-app
+# namespaces preview builds), and the cached Docker Hub base images live at the
+# registry ROOT, shared across every repo — never under a repo prefix — so they
+# are never caught by this.
+#
+# This needs data-plane rights that the onboarding SP's subscription Owner role
+# does NOT confer under ABAC: registry-wide Repository Contributor (delete) and
+# Catalog Lister (enumerate), both granted in acr/main.bicep. Best-effort
+# throughout — a failure here must never block or fail the teardown.
+Write-Host "Step 3d: Purging '$GitHubRepo' from the shared registry '$sharedAcrName'..." -ForegroundColor Cyan
+$sharedAcrId = az acr show --name $sharedAcrName --query id --output tsv --only-show-errors 2>$null
+$global:LASTEXITCODE = 0
+if (-not $sharedAcrId) {
+    Write-Host "  Shared registry '$sharedAcrName' not found — skipping" -ForegroundColor Yellow
+} else {
+    # 1. Image repositories under this repo's prefixes.
+    $prefixes = @("$GitHubRepo/", "$GitHubRepo-preview/")
+    $repoListJson = az acr repository list --name $sharedAcrName --output json --only-show-errors 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $repoListJson) {
+        Write-Host "  WARNING: could not list repositories — images NOT purged." -ForegroundColor Yellow
+        Write-Host "           The onboarding SP needs Catalog Lister on '$sharedAcrName' (acr/main.bicep)." -ForegroundColor Yellow
+    } else {
+        $mine = @(($repoListJson | ConvertFrom-Json) | Where-Object {
+            $name = $_
+            @($prefixes | Where-Object { $name.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        })
+        if ($mine.Count -eq 0) {
+            Write-Host "  No '$GitHubRepo/' image repositories in '$sharedAcrName'" -ForegroundColor Yellow
+        }
+        foreach ($imageRepo in $mine) {
+            az acr repository delete --name $sharedAcrName --repository $imageRepo --yes --only-show-errors 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Deleted image repository '$imageRepo'" -ForegroundColor Green
+            } else {
+                Write-Host "  WARNING: failed to delete image repository '$imageRepo'" -ForegroundColor Yellow
+            }
+            $global:LASTEXITCODE = 0
+        }
+    }
+    $global:LASTEXITCODE = 0
+
+    # 2. ABAC role assignments held by this repo's (now deleted) principals.
+    # List once and filter locally on principalId: the principals no longer
+    # exist, so --assignee would fail its Microsoft Graph lookup.
+    if ($sharedAcrPrincipalIds.Count -eq 0) {
+        Write-Host "  No captured principals — no role assignments to remove" -ForegroundColor Yellow
+    } else {
+        $allRas = az role assignment list --scope $sharedAcrId --output json --only-show-errors 2>$null | ConvertFrom-Json
+        $global:LASTEXITCODE = 0
+        $stale = @($allRas | Where-Object { $sharedAcrPrincipalIds -contains $_.principalId })
+        if ($stale.Count -eq 0) {
+            Write-Host "  No role assignments for this repo on '$sharedAcrName'" -ForegroundColor Yellow
+        }
+        foreach ($ra in $stale) {
+            az role assignment delete --ids $ra.id --only-show-errors 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Removed '$($ra.roleDefinitionName)' for $($ra.principalId)" -ForegroundColor Green
+            } else {
+                Write-Host "  WARNING: failed to remove role assignment $($ra.id)" -ForegroundColor Yellow
+            }
+            $global:LASTEXITCODE = 0
+        }
+    }
+}
+$global:LASTEXITCODE = 0
+Write-Host ""
+
 # ─── Step 4: Archive or delete the GitHub repository ─────────────────
 if ($GitHubRepoAction -ne "keep") {
     Write-Host "Step 4: $($GitHubRepoAction)ing GitHub repository '$repoFullName'..." -ForegroundColor Cyan
@@ -357,7 +466,7 @@ Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host "Decommission Complete" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Removed: rg-$GitHubRepo (incl. its ACR + images), $ServicePrincipalName, the Easy Auth app, and purged the soft-deleted Key Vault(s) + Easy Auth app so a same-name re-onboard works" -ForegroundColor Green
+Write-Host "Removed: rg-$GitHubRepo, $ServicePrincipalName, the Easy Auth app, this repo's images + grants on $sharedAcrName, and purged the soft-deleted Key Vault(s) + Easy Auth app so a same-name re-onboard works" -ForegroundColor Green
 switch ($GitHubRepoAction) {
     "keep"    { Write-Host "The GitHub repository '$repoFullName' was kept." -ForegroundColor Cyan }
     "archive" { Write-Host "The GitHub repository '$repoFullName' was archived (read-only)." -ForegroundColor Cyan }
