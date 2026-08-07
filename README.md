@@ -31,7 +31,7 @@ Azure-infrastructure (this repo)
         └── Microsoft Graph: Application.ReadWrite.All + AppRoleAssignment.ReadWrite.All
 
 Onboarded repos:
-  ├── my-api   → SP sp-my-api-github  → Owner on rg-my-api  (own ACR, Container App, …)
+  ├── my-api   → SP sp-my-api-github  → Owner on rg-my-api  (Container App, identity, …)
   └── my-site  → SP sp-my-site-github → Owner on rg-my-site (Static Web App, …)
 ```
 
@@ -60,11 +60,16 @@ Onboarding is **idempotent** — re-running never duplicates resources.
 
 | Template | Source | What you get |
 |----------|--------|--------------|
-| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App (scale-to-zero, Log Analytics), **its own per-repo ACR** with image pull via a user-assigned managed identity, secret-less **Entra Easy Auth** (default on). |
+| `container-app` | [`KennethHeine/template-container-app`](https://github.com/KennethHeine/template-container-app) | Azure Container App (scale-to-zero, Log Analytics), images in the **shared ACR** pulled via a user-assigned managed identity, secret-less **Entra Easy Auth** (default on). |
 | `static-web` | [`KennethHeine/template-static-web`](https://github.com/KennethHeine/template-static-web) | Next.js static export on Azure Static Web Apps (prod + PR previews). |
 
-Each `container-app` repo gets **its own** container registry inside `rg-<repo>`
-— there is no shared registry, so image push/pull is fully isolated per repo.
+Every `container-app` repo shares one estate-wide registry, **`acrkscloud`** in
+`rg-acr`, with images namespaced under each repo's own `<repo>/` path. Isolation
+is **Entra ABAC repository permissions** rather than a separate registry per
+repo: a repo's identities hold roles that only resolve for its own path. The
+grants are derived from `repos.json` during onboarding, so a new repo needs no
+registry configuration. (Nine per-repo registries were consolidated into this one
+on 2026-08-06.)
 
 ## Operating it
 
@@ -82,9 +87,11 @@ It appends the entry to `repos.json` and pushes to `main` (using
 ### Decommission a repo
 Run **Decommission Repo** (`decommission-repo.yml`) — you must type the repo
 name into `confirm`. It removes the `repos.json` entry, deletes `rg-<repo>`
-(including the repo's ACR + images, Container App, identity, etc.), the SP, any
-Entra apps the SP owns (e.g. the Easy Auth app), and — per the `github_repo`
-input — **keeps**, **archives** (read-only), or **deletes** the GitHub repo.
+(Container App, identity, etc.), the SP, any Entra apps the SP owns (e.g. the
+Easy Auth app), **its images and registry grants in the shared `acrkscloud`**
+(these no longer die with the resource group), its entries in the grant configs,
+and — per the `github_repo` input — **keeps**, **archives** (read-only), or
+**deletes** the GitHub repo.
 
 ### Manually
 ```powershell
