@@ -40,6 +40,17 @@
         "Log Analytics Reader",
         "Cost Management Reader"
       ]
+    },
+    {
+      "comment": "agent sysadmin profile: the SAME read set as the id-agent-session-localsys entry above, which this replaces. The profile is being renamed local-sysadmin -> sysadmin (it stopped being local-only when it absorbed the retired cloud-sysadmin role on 2026-08-04, so the name was simply wrong). Both identities are listed during the migration because the grant has to exist BEFORE agent's catalog cuts over to the new one; the localsys entry above is deleted once the rename is verified live. Read-only — every Azure CHANGE still goes through Bicep + Actions. The matching Entra directory read is in graph-grants.json.",
+      "identityName": "id-agent-session-sysadmin",
+      "identityResourceGroup": "rg-agent",
+      "scope": "subscription",
+      "roles": [
+        "Reader",
+        "Log Analytics Reader",
+        "Cost Management Reader"
+      ]
     }
   ]
 }

@@ -33,6 +33,17 @@
           "appRoleId": "7ab1d382-f21e-4acd-a863-ba3e13f7da61"
         }
       ]
+    },
+    {
+      "comment": "agent sysadmin profile: the SAME Entra DIRECTORY READ as the id-agent-session-localsys entry above, which this replaces — the profile is being renamed local-sysadmin -> sysadmin (see the matching note in role-grants.json). Both identities are listed during the migration because the grant must exist BEFORE agent's catalog cuts over; the localsys entry above is deleted once the rename is verified live. Read-only application permission, DIRECTORY-WIDE across the tenant — broader than the Azure RBAC grants in role-grants.json. NO write permission: app registrations, role assignments and RBAC changes stay in the control plane. appRoleId copied verbatim from the entries above (successfully applied grants).",
+      "identityName": "id-agent-session-sysadmin",
+      "identityResourceGroup": "rg-agent",
+      "appRoles": [
+        {
+          "name": "Directory.Read.All",
+          "appRoleId": "7ab1d382-f21e-4acd-a863-ba3e13f7da61"
+        }
+      ]
     }
   ]
 }
