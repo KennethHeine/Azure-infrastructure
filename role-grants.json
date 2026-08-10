@@ -31,18 +31,7 @@
       ]
     },
     {
-      "comment": "agent local-sysadmin profile: full read-only estate visibility — resource state, runtime logs and cost. Kenneth's ask 2026-08-04: the local-sysadmin profile absorbs the retired cloud-sysadmin role and becomes sysadmin for cloud AND local, so it gets the same read set the coder profile holds (the two grants above). Read-only — every Azure CHANGE still goes through Bicep + Actions. The matching Entra directory read is in graph-grants.json.",
-      "identityName": "id-agent-session-localsys",
-      "identityResourceGroup": "rg-agent",
-      "scope": "subscription",
-      "roles": [
-        "Reader",
-        "Log Analytics Reader",
-        "Cost Management Reader"
-      ]
-    },
-    {
-      "comment": "agent sysadmin profile: the SAME read set as the id-agent-session-localsys entry above, which this replaces. The profile is being renamed local-sysadmin -> sysadmin (it stopped being local-only when it absorbed the retired cloud-sysadmin role on 2026-08-04, so the name was simply wrong). Both identities are listed during the migration because the grant has to exist BEFORE agent's catalog cuts over to the new one; the localsys entry above is deleted once the rename is verified live. Read-only — every Azure CHANGE still goes through Bicep + Actions. The matching Entra directory read is in graph-grants.json.",
+      "comment": "agent sysadmin profile: full read-only estate visibility — resource state, runtime logs and cost. The same read set id-agent-session holds (the two grants above). Kenneth's ask 2026-08-04: this profile absorbed the retired cloud-sysadmin role and became sysadmin for cloud AND local, which is why it was renamed from local-sysadmin to sysadmin on 2026-08-10 — the identity moved from id-agent-session-localsys to id-agent-session-sysadmin with the same grants, and the old one was deleted. Read-only — every Azure CHANGE still goes through Bicep + Actions. The matching Entra directory read is in graph-grants.json.",
       "identityName": "id-agent-session-sysadmin",
       "identityResourceGroup": "rg-agent",
       "scope": "subscription",
