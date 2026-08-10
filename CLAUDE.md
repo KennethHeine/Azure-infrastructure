@@ -130,12 +130,15 @@ Current grants (`role-grants.json` is the truth — this list is a summary):
   every k8s federated credential moved in the same change as this grant.
 - `agent` **session identity** (`id-agent-session`) → subscription **Reader** +
   **Log Analytics Reader**, plus **Cost Management Reader**.
-- `agent` **local-sysadmin session identity** (`id-agent-session-localsys`) →
+- `agent` **sysadmin session identity** (`id-agent-session-sysadmin`) →
   subscription **Reader** + **Log Analytics Reader** + **Cost Management
   Reader** — the same read set as `id-agent-session` above, granted 2026-08-04
-  when the local-sysadmin profile absorbed the retired cloud-sysadmin role and
-  became sysadmin for cloud AND local. Its Entra directory read is in
-  `graph-grants.json`.
+  when the profile absorbed the retired cloud-sysadmin role and became sysadmin
+  for cloud AND local. That is also why it was **renamed from `local-sysadmin`
+  to `sysadmin` on 2026-08-10**: the identity moved from
+  `id-agent-session-localsys` to `id-agent-session-sysadmin` with the same
+  grants, and the old identity, its assignments and its Key Vault were deleted.
+  Its Entra directory read is in `graph-grants.json`.
 
 (The five `agent` **Key Vault** grants into `rg-claude-runner` — `id-agent` on the
 shared `github-app-private-key` vault and the four per-profile `Secrets Officer`
@@ -168,8 +171,8 @@ from the resource API's permission reference and are constant across tenants
 (default resource is Microsoft Graph; override with `resourceAppId`).
 
 Current grants (`graph-grants.json` is the truth — this list is a summary):
-- `agent` **coder** and **local-sysadmin** session identities (`id-agent-session`,
-  `id-agent-session-localsys`) → Microsoft Graph **Directory.Read.All**
+- `agent` **coder** and **sysadmin** session identities (`id-agent-session`,
+  `id-agent-session-sysadmin`) → Microsoft Graph **Directory.Read.All**
   (application, read-only). Lets estate work resolve principals and inspect app
   registrations; without it `az role assignment list` prints *"Failed to query by
   invoking Graph API"* and shows raw object ids. Note it is **directory-wide read

@@ -56,7 +56,6 @@
           "id-agent",
           "id-agent-session",
           "id-agent-session-business",
-          "id-agent-session-localsys",
           "id-agent-session-personal",
           "id-agent-session-sysadmin"
         ]
