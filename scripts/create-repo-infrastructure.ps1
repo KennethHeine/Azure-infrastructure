@@ -366,8 +366,13 @@ if ($AzureOnly) {
     )) {
         $expectedSubject = $OidcSubjectPrefix + $credential.Suffix
         Add-FederatedCredential -AppId $appId -Name $credential.Name -Subject $expectedSubject -Description 'GitHub Actions OIDC'
-        $actualSubject = az ad app federated-credential list --id $appId --query "[?name=='$($credential.Name)'].subject | [0]" -o tsv --only-show-errors
-        if ($LASTEXITCODE -ne 0 -or $actualSubject -ne $expectedSubject) { throw 'Federated credential verification failed' }
+        $verifiedCredential = $false
+        for ($readAttempt = 0; $readAttempt -lt 5; $readAttempt++) {
+            $actualSubject = az ad app federated-credential list --id $appId --query "[?name=='$($credential.Name)'].subject | [0]" -o tsv --only-show-errors
+            if ($LASTEXITCODE -eq 0 -and $actualSubject -eq $expectedSubject) { $verifiedCredential = $true; break }
+            if ($readAttempt -lt 4) { Start-Sleep -Seconds 3 }
+        }
+        if (-not $verifiedCredential) { throw "Federated credential verification failed for $($credential.Name): expected '$expectedSubject', observed '$actualSubject'" }
     }
     @{
         repository = "$GitHubOrg/$GitHubRepo"
