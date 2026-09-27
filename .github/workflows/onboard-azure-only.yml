@@ -1,0 +1,55 @@
+name: Onboard Azure Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Existing repo registered in repos.json; GitHub setup uses local gh auth
+        required: true
+        type: string
+      oidc_subject_prefix:
+        description: Exact sub_claim_prefix from the new repo OIDC customization endpoint
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: onboarding-azure-only-${{ inputs.repository }}
+  cancel-in-progress: false
+
+jobs:
+  onboard:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Validate declared scope and onboard Azure
+        shell: pwsh
+        env:
+          REPOSITORY_NAME: ${{ inputs.repository }}
+          OIDC_SUBJECT_PREFIX: ${{ inputs.oidc_subject_prefix }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:REPOSITORY_NAME -notmatch '^[a-zA-Z0-9._-]+$') { throw 'Invalid repo name' }
+          $config = Get-Content ./repos.json -Raw | ConvertFrom-Json
+          $entries = @($config.repos | Where-Object { $_.name -eq $env:REPOSITORY_NAME })
+          if ($entries.Count -ne 1 -or $entries[0].template -ne 'none' -or $entries[0].preview) {
+            throw 'Split onboarding requires exactly one declared template-none repo without preview'
+          }
+          ./scripts/create-repo-infrastructure.ps1 -GitHubRepo $env:REPOSITORY_NAME -GitHubOrg $config.gitHubOrg -Location $config.location -Template none -EnableAuth ([bool]$entries[0].auth) -AzureOnly -OidcSubjectPrefix $env:OIDC_SUBJECT_PREFIX -SettingsOutput ./onboarding-settings.json
+          if ($LASTEXITCODE -ne 0) { throw 'Azure onboarding failed' }
+          ./scripts/apply-role-grants.ps1 -RepositoryName $env:REPOSITORY_NAME
+          if ($LASTEXITCODE -ne 0) { throw 'Registry grants failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onboarding-settings
+          path: onboarding-settings.json
+          retention-days: 1

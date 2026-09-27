@@ -73,7 +73,7 @@
     {
       "name": "ks-integrations",
       "template": "none",
-      "auth": true,
+      "auth": false,
       "sharedAcr": {
         "pullIdentities": ["id-ks-integrations"],
         "cloudBuild": false

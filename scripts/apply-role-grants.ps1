@@ -35,7 +35,9 @@
 
 [CmdletBinding()]
 param(
-    [string]$ConfigFile
+    [string]$ConfigFile,
+    [ValidatePattern('^[a-zA-Z0-9._-]+$')]
+    [string]$RepositoryName
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,6 +85,11 @@ if (Test-Path $deriveScript) {
 }
 
 $grants = @($derivedGrants) + @($declaredGrants)
+if ($RepositoryName) {
+    $grants = @($grants | Where-Object {
+        $_.identityResourceGroup -eq "rg-$RepositoryName" -or $_.identityName -eq "sp-$RepositoryName-github"
+    })
+}
 if ($grants.Count -eq 0) {
     Write-Host "No grants defined. Nothing to do." -ForegroundColor Yellow
     exit 0

@@ -147,3 +147,18 @@ front (`scripts/test-automation-token.ps1`); rotate it with
 
 `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (the onboarding SP)
 and `AUTOMATION_GITHUB_TOKEN`.
+
+## PAT-free split onboarding
+
+When a repo is created using an existing local GitHub CLI login, use
+**Onboard Azure Only** with its registered name and exact live OIDC
+`sub_claim_prefix`. This manual workflow runs on main, accepts only one declared
+`template: none` repo without preview, creates its Azure footprint through the
+existing onboarding script, verifies the federated credentials, and applies only
+that repo's registry grants. It does not consume `AUTOMATION_GITHUB_TOKEN`.
+
+The `onboarding-settings` artifact contains only resource names and client,
+tenant, and subscription IDs. With the same local `gh` login, store these three
+IDs as the app repo's `AZURE_*` Actions secrets and set `RESOURCE_GROUP`.
+Never copy the CLI login token into an Actions secret. The original all-repo
+onboarding flow is unchanged and still requires its own valid automation token.

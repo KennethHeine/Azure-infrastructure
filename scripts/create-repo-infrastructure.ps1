@@ -44,10 +44,23 @@ param(
     # federated to ANY branch) so non-main branches can deploy to a sandbox that
     # has no path to prod. Surfaced as repo secret AZURE_CLIENT_ID_PREVIEW + var
     # RESOURCE_GROUP_PREVIEW for the deploy workflows to route to.
-    [bool]$Preview = $false
+    [bool]$Preview = $false,
+
+    # Split onboarding: GitHub setup is completed with an existing local gh login.
+    # Azure still runs only in the infra repo's OIDC workflow.
+    [switch]$AzureOnly,
+    [string]$OidcSubjectPrefix,
+    [string]$SettingsOutput
 )
 
 $ErrorActionPreference = "Stop"
+if ($AzureOnly) {
+    if ($Preview) { throw 'AzureOnly does not support preview onboarding' }
+    $expectedPrefix = '^repo:' + [regex]::Escape($GitHubOrg) + '(?:@[0-9]+)?/' + [regex]::Escape($GitHubRepo) + '(?:@[0-9]+)?$'
+    if (-not $SettingsOutput -or $OidcSubjectPrefix -notmatch $expectedPrefix) {
+        throw 'AzureOnly requires a settings output and the exact live repository OIDC prefix'
+    }
+}
 
 # ─── Derive names from repo ──────────────────────────────────────────
 $ResourceGroupName = "rg-$GitHubRepo"
@@ -343,6 +356,29 @@ if ($EnableAuth) {
         Write-Host "  WARNING: Could not resolve SP / Graph object IDs — skipping Graph grants" -ForegroundColor Yellow
     }
     Write-Host ""
+}
+
+# The split lane performs no GitHub calls and consumes no automation PAT.
+if ($AzureOnly) {
+    foreach ($credential in @(
+        @{ Name = 'github-actions-main'; Suffix = ':ref:refs/heads/main' },
+        @{ Name = 'github-actions-pr'; Suffix = ':pull_request' }
+    )) {
+        $expectedSubject = $OidcSubjectPrefix + $credential.Suffix
+        Add-FederatedCredential -AppId $appId -Name $credential.Name -Subject $expectedSubject -Description 'GitHub Actions OIDC'
+        $actualSubject = az ad app federated-credential list --id $appId --query "[?name=='$($credential.Name)'].subject | [0]" -o tsv --only-show-errors
+        if ($LASTEXITCODE -ne 0 -or $actualSubject -ne $expectedSubject) { throw 'Federated credential verification failed' }
+    }
+    @{
+        repository = "$GitHubOrg/$GitHubRepo"
+        resourceGroup = $ResourceGroupName
+        clientId = $appId
+        tenantId = $tenantId
+        subscriptionId = $subscriptionId
+    } | ConvertTo-Json | Set-Content -LiteralPath $SettingsOutput -Encoding utf8
+    Write-Host "Azure-only onboarding verified; GitHub setup remains a separate local step."
+    $global:LASTEXITCODE = 0
+    return
 }
 
 # ─── Step 6: Create GitHub Repository ────────────────────────────────
