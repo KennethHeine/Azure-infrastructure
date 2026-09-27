@@ -69,7 +69,8 @@
         "pullIdentities": ["id-trading-lab-lane", "id-trading-lab-dashboard"],
         "cloudBuild": false
       }
-    }    ,{
+    },
+    {
       "name": "ks-integrations",
       "template": "none",
       "auth": true,
@@ -78,6 +79,5 @@
         "cloudBuild": false
       }
     }
-
   ]
 }
