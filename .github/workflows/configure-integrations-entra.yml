@@ -1,0 +1,43 @@
+name: Configure KS Integrations Entra
+on:
+  workflow_dispatch:
+    inputs:
+      callback_url:
+        description: Exact callback from the ChatGPT MCP connection
+        required: true
+        type: string
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: ks-integrations-entra
+  cancel-in-progress: false
+jobs:
+  configure:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy only the declared API and ChatGPT client with Bicep
+        env:
+          CALLBACK_URL: ${{ inputs.callback_url }}
+        run: |
+          set -euo pipefail
+          node -e 'const u=new URL(process.env.CALLBACK_URL); if(u.origin!=="https://chatgpt.com" || !/^\/connector\/oauth\/[a-zA-Z0-9_-]+$/.test(u.pathname) || u.search || u.hash) throw Error("Unexpected callback");'
+          TENANT=$(az account show --query tenantId -o tsv)
+          test "$TENANT" = '14bc2ff7-5fd1-4ce2-a110-4f71b9a2ce41'
+          DOMAIN=$(az resource show -g rg-ks-integrations -n cae-ks-integrations --resource-type Microsoft.App/managedEnvironments --api-version 2026-07-01 --query properties.defaultDomain -o tsv)
+          RESOURCE="https://ca-ks-integrations.$DOMAIN/mcp"
+          az deployment group create -g rg-ks-integrations -n "entra-v2-${GITHUB_RUN_ID}" --template-file integrations/entra.bicep --parameters resourceUrl="$RESOURCE" callbackUrl="$CALLBACK_URL" bindIdentifier=false --output none
+          az deployment group create -g rg-ks-integrations -n "entra-bind-${GITHUB_RUN_ID}" --template-file integrations/entra.bicep --parameters resourceUrl="$RESOURCE" callbackUrl="$CALLBACK_URL" bindIdentifier=true --query properties.outputs -o json > /tmp/entra-settings.json
+          cat /tmp/entra-settings.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: entra-settings
+          path: /tmp/entra-settings.json
+          retention-days: 1
