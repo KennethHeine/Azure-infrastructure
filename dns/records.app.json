@@ -90,14 +90,6 @@
       ]
     },
     {
-      "type": "CNAME",
-      "name": "meyer-party",
-      "ttl": 3600,
-      "values": [
-        "ca-meyer-party.wonderfulbay-a1e30408.swedencentral.azurecontainerapps.io"
-      ]
-    },
-    {
       "type": "TXT",
       "name": "asuid.meyer-party",
       "ttl": 3600,
