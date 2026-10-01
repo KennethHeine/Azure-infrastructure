@@ -22,11 +22,6 @@
       "auth": true
     },
     "homelab",
-    {
-      "name": "tabt-arbejdsfortjeneste",
-      "template": "container-app",
-      "auth": true
-    },
     "agent-research",
     {
       "name": "agent",
