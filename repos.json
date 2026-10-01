@@ -53,7 +53,9 @@
       "template": "none",
       "auth": false,
       "sharedAcr": {
-        "pullIdentities": ["id-ks-integrations"],
+        "pullIdentities": [
+          "id-ks-integrations"
+        ],
         "cloudBuild": false
       }
     }
