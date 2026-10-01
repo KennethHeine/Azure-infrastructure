@@ -13,3 +13,9 @@ param controlPlanePrincipalId = '4d0863fa-5c70-4b02-a413-566dbf98a3ea'
 param operatorPrincipalIds = [
   'b8df5049-1dac-470e-b653-7772c72c4611' // kenneth@kscloud.io
 ]
+
+// Kenneth explicitly requested permission to manage and delete images in this
+// registry on 2026-10-01. Keep other human operators read-only by default.
+param operatorContributorPrincipalIds = [
+  'b8df5049-1dac-470e-b653-7772c72c4611' // kenneth@kscloud.io
+]

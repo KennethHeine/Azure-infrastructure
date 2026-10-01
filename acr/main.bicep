@@ -44,6 +44,9 @@ param controlPlanePrincipalId string = ''
 @description('Object ids of human operators granted registry-wide Catalog Lister + Repository Reader, so this registry can actually be inspected. Empty = skip.')
 param operatorPrincipalIds array = []
 
+@description('Object ids of human operators explicitly granted registry-wide Repository Contributor access, including image deletion. Empty = skip.')
+param operatorContributorPrincipalIds array = []
+
 // ABAC-enabled built-in role definition ids (constant across tenants).
 var repositoryContributorRoleId = '2efddaa5-3f1f-4df3-97df-af3f13818f4c'
 var repositoryReaderRoleId = 'b93aa761-3e63-49ed-ac28-beffa264f7ac'
@@ -135,6 +138,18 @@ resource operatorRepositoryReader 'Microsoft.Authorization/roleAssignments@2022-
     name: guid(acr.id, principalId, repositoryReaderRoleId)
     properties: {
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', repositoryReaderRoleId)
+      principalId: principalId
+      principalType: 'User'
+    }
+  }
+]
+
+resource operatorRepositoryContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+  for principalId in operatorContributorPrincipalIds: {
+    scope: acr
+    name: guid(acr.id, principalId, repositoryContributorRoleId)
+    properties: {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', repositoryContributorRoleId)
       principalId: principalId
       principalType: 'User'
     }
