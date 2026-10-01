@@ -3,14 +3,6 @@
   "records": [
     {
       "type": "CNAME",
-      "name": "fodbold",
-      "ttl": 300,
-      "values": [
-        "ashy-smoke-009d28303.7.azurestaticapps.net"
-      ]
-    },
-    {
-      "type": "CNAME",
       "name": "kontoplan",
       "ttl": 3600,
       "values": [
