@@ -90,14 +90,6 @@
       ]
     },
     {
-      "type": "CNAME",
-      "name": "jamie",
-      "ttl": 3600,
-      "values": [
-        "ca-tabt-arbejdsfortjeneste.happydesert-007f19f8.swedencentral.azurecontainerapps.io"
-      ]
-    },
-    {
       "type": "TXT",
       "name": "asuid.jamie",
       "ttl": 3600,
