@@ -531,6 +531,15 @@ shared registry `acrkscloud` (Step 3d — these no longer die with the RG)**, an
 `pwsh ./scripts/process-repos.ps1 -ConfigFile ./repos.json` (needs `az login` +
 `AUTOMATION_GITHUB_TOKEN`).
 
+### Runtime-owned homelab DNS
+
+`dns/records.external.json` reserves exactly `A ha` and `TXT _acme-challenge.bunkerweb`
+for Arc DDNS and Certbot. The pruner retains these names, but regular Bicep deploys
+never overwrite their changing values. Use Deploy DNS Zone's optional `homelab_ipv4`
+input only for an explicit HA bootstrap/recovery with the public IP confirmed on
+dockhost; it deploys `dns/homelab-bootstrap.bicep`. Leave the input empty normally.
+Never add an external record without a concrete owner and narrow scope.
+
 ### Manage DNS records (kscloud.io)
 The zone's records are split across **two source files** by blast radius, and
 `dns/main.bicep` projects their **union** into Azure DNS record sets (looped by

@@ -2,6 +2,11 @@ name: Deploy DNS Zone
 
 on:
   workflow_dispatch:
+    inputs:
+      homelab_ipv4:
+        description: 'Explicit bootstrap of HA dynamic A record (leave empty normally)'
+        type: string
+        required: false
 
   push:
     branches: [main]
@@ -23,6 +28,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      - name: Validate DNS ownership boundaries
+        run: python3 dns/validate.py
 
       - name: Azure Login (OIDC)
         uses: azure/login@v3
@@ -47,7 +55,20 @@ jobs:
             --template-file ./dns/main.bicep \
             --only-show-errors
 
-      - name: Reconcile (prune records in neither record file)
+      - name: Bootstrap Home Assistant dynamic DNS when explicitly requested
+        if: github.event_name == 'workflow_dispatch' && inputs.homelab_ipv4 != ''
+        env:
+          PUBLIC_IPV4: ${{ inputs.homelab_ipv4 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c 'import ipaddress,os; assert ipaddress.IPv4Address(os.environ["PUBLIC_IPV4"]).is_global'
+          az deployment group create --resource-group "$RESOURCE_GROUP" \
+            --name "homelab-dns-${{ github.run_number }}" \
+            --template-file dns/homelab-bootstrap.bicep \
+            --parameters publicIpv4="$PUBLIC_IPV4" --only-show-errors
+
+      - name: Reconcile (preserve explicitly registered external records)
         shell: bash
         run: |
           set -euo pipefail
@@ -57,9 +78,10 @@ jobs:
           # any record set in the zone that is in neither file is deleted. The
           # Azure-managed apex SOA and NS records are always preserved. Records
           # added directly in the portal (i.e. in neither file) will be pruned
-          # here — keep the two record files the source of truth.
+          # here. records.external.json reserves exact type/name pairs for runtime
+          # writers such as Arc DDNS and ACME; Bicep never overwrites their values.
           ZONE=$(jq -r '.zoneName' dns/records.platform.json)
-          desired=$(jq -r '.records[] | "\(.type) \(.name)"' dns/records.platform.json dns/records.app.json | sort -u)
+          desired=$(jq -r '.records[] | "\(.type) \(.name)"' dns/records.platform.json dns/records.app.json dns/records.external.json | sort -u)
           echo "Desired record sets:"; echo "$desired" | sed 's/^/  /'
 
           az network dns record-set list -g "$RESOURCE_GROUP" -z "$ZONE" \
