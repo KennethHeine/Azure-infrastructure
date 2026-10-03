@@ -1,0 +1,14 @@
+{
+  "records": [
+    {
+      "type": "A",
+      "name": "ha",
+      "owner": "homelab azure-ddns (Arc managed identity)"
+    },
+    {
+      "type": "TXT",
+      "name": "_acme-challenge.bunkerweb",
+      "owner": "homelab Certbot DNS-01 (Arc managed identity)"
+    }
+  ]
+}

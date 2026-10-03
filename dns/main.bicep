@@ -11,6 +11,8 @@
 // NOTE: ARM incremental deployments never delete records dropped from the
 // template, so the Deploy DNS Zone workflow runs a reconcile/prune step after
 // this deployment to delete any record set in the zone that is in neither file.
+// records.external.json reserves exact runtime-owned names for the pruner.
+// Those records are deliberately not deployed here: Arc/ACME manage their values.
 // NS and SOA at the apex are Azure-managed and excluded here.
 
 targetScope = 'resourceGroup'
