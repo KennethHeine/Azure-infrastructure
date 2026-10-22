@@ -8,6 +8,7 @@ param callbackUrl string
 @description('Second pass binds HTTPS identifier after the API is configured for v2 tokens.')
 param bindIdentifier bool = false
 var scopeId = guid(tenant().tenantId, 'ks-integrations', 'integrations.read')
+var accountingScopeId = guid(tenant().tenantId, 'ks-integrations', 'integrations.accounting')
 var suffix = uniqueString(subscription().id, resourceGroup().id)
 
 resource api 'Microsoft.Graph/applications@v1.0' = {
@@ -26,6 +27,15 @@ resource api 'Microsoft.Graph/applications@v1.0' = {
       adminConsentDescription: 'Read bookkeeping overviews and prepare proposals. Does not post or reconcile.'
       userConsentDisplayName: 'Read KS Integrations'
       userConsentDescription: 'Read your bookkeeping overview and prepare proposals. Does not post or reconcile.'
+    }, {
+      id: accountingScopeId
+      value: 'integrations.accounting'
+      type: 'User'
+      isEnabled: true
+      adminConsentDisplayName: 'Execute approved KS bookkeeping actions'
+      adminConsentDescription: 'Create, update and post KS Cloud vouchers only with separate exact approvals. Does not make payments or reconcile.'
+      userConsentDisplayName: 'Execute your approved KS bookkeeping actions'
+      userConsentDescription: 'Create, update and post KS Cloud vouchers only with your separate exact approvals. Does not make payments or reconcile.'
     }]
   }
 }
@@ -40,7 +50,10 @@ resource client 'Microsoft.Graph/applications@v1.0' = {
   publicClient: { redirectUris: [callbackUrl] }
   requiredResourceAccess: [{
     resourceAppId: api.appId
-    resourceAccess: [{ id: scopeId, type: 'Scope' }]
+    resourceAccess: [
+      { id: scopeId, type: 'Scope' }
+      { id: accountingScopeId, type: 'Scope' }
+    ]
   }]
   dependsOn: [apiPrincipal]
 }
@@ -53,4 +66,5 @@ output tenantId string = tenant().tenantId
 output oauthIssuer string = 'https://login.microsoftonline.com/${tenant().tenantId}/v2.0'
 output resource string = resourceUrl
 output scope string = '${resourceUrl}/integrations.read'
+output accountingScope string = '${resourceUrl}/integrations.accounting'
 output callback string = callbackUrl
