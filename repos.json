@@ -43,6 +43,11 @@
         ],
         "cloudBuild": false
       }
+    },
+    {
+      "name": "meyer-party",
+      "template": "container-app",
+      "auth": false
     }
   ]
 }
