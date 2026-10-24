@@ -12,27 +12,7 @@
       "template": "container-app",
       "auth": true
     },
-    {
-      "name": "cvr-portal",
-      "template": "container-app",
-      "auth": true
-    },
     "homelab",
-    {
-      "name": "agent",
-      "template": "container-app",
-      "auth": true,
-      "preview": true,
-      "sharedAcr": {
-        "pullIdentities": [
-          "id-agent",
-          "id-agent-session",
-          "id-agent-session-business",
-          "id-agent-session-personal",
-          "id-agent-session-sysadmin"
-        ]
-      }
-    },
     {
       "name": "ks-integrations",
       "template": "none",
@@ -43,11 +23,6 @@
         ],
         "cloudBuild": false
       }
-    },
-    {
-      "name": "meyer-party",
-      "template": "container-app",
-      "auth": false
     }
   ]
 }
