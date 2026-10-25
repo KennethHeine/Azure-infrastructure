@@ -116,44 +116,13 @@ Repositories** after its first infra deploy). Schema:
 `role-grants.schema.json`. Two `scope`s: `subscription`, or `resource` (a
 single resource OUTSIDE the identity's repo RG, named by `scopeResourceId`).
 
-Current grants (`role-grants.json` is the truth — this list is a summary):
-- `agent` **broker** (`id-agent`) → *Azure Arc Enabled Kubernetes Cluster User
-  Role* on the homelab cluster `dockhost-k3s` in **`rg-homelab`** (moved here
-  2026-08-05 — this is the agent platform's homelab session backend). It used to
-  live in `rg-claude-runner-preview` as `claude-k8s-preview`: a parked 2026-06-23
-  spike (`test/arc-k8s`) that quietly became load-bearing once claude-runner,
-  then agent, started sharing it rather than registering a second connection —
-  a k8s cluster can be Arc-connected only once. Re-registering it into its
-  correct home (alongside the `dockhost` Arc **machine**, which was always here)
-  needed a delete + reconnect — there is no RG-move for
-  `Microsoft.Kubernetes/connectedClusters` — which mints a NEW OIDC issuer URL;
-  every k8s federated credential moved in the same change as this grant.
-- `agent` **session identity** (`id-agent-session`) → subscription **Reader** +
-  **Log Analytics Reader**, plus **Cost Management Reader**.
-- `agent` **sysadmin session identity** (`id-agent-session-sysadmin`) →
-  subscription **Reader** + **Log Analytics Reader** + **Cost Management
-  Reader** — the same read set as `id-agent-session` above, granted 2026-08-04
-  when the profile absorbed the retired cloud-sysadmin role and became sysadmin
-  for cloud AND local. That is also why it was **renamed from `local-sysadmin`
-  to `sysadmin` on 2026-08-10**: the identity moved from
-  `id-agent-session-localsys` to `id-agent-session-sysadmin` with the same
-  grants, and the old identity, its assignments and its Key Vault were deleted.
-  Its Entra directory read is in `graph-grants.json`.
+There are currently no bespoke grants in `role-grants.json`. The four retired
+`agent` entries were removed after `rg-agent` was deleted on 2026-10-25. Shared
+ACR grants for active repos are still derived from `repos.json` as above.
 
-(The five `agent` **Key Vault** grants into `rg-claude-runner` — `id-agent` on the
-shared `github-app-private-key` vault and the four per-profile `Secrets Officer`
-grants — were **removed 2026-08-04**: agent now owns its own per-profile vaults in
-`rg-agent`, declared in its own Bicep next to the identities that receive them, so
-these cross-RG grants are dead. Note `apply-role-grants.ps1` is additive only, so
-removing an entry stops it being re-granted but does **not** revoke the live
-assignment — delete those separately, or let them die with the old vaults.)
-
-(The former `dockhost` Arc-machine grants for the `claude-runner` / `claude-runner-test`
-brokers — *Virtual Machine User Login* + *Azure Connected Machine Resource Administrator*,
-for the SSH-over-Arc `arc:dockhost` session backend — were **removed 2026-06-26**: that
-backend was retired in favour of the Arc-enabled k3s (`k8s`) backend, which authenticates
-to the cluster with its own Cluster-User grant + a ServiceAccount token, needing no
-machine-scoped access. The live assignments were deleted too.)
+`apply-role-grants.ps1` is additive: removing declarations prevents future
+re-grants but does **not** revoke existing live assignments. Remaining agent
+assignments outside the deleted RG require a separately reviewed cleanup.
 
 ## Config: `graph-grants.json`
 
@@ -170,25 +139,10 @@ Repositories** afterwards). Schema: `graph-grants.schema.json`. App-role ids com
 from the resource API's permission reference and are constant across tenants
 (default resource is Microsoft Graph; override with `resourceAppId`).
 
-Current grants (`graph-grants.json` is the truth — this list is a summary):
-- `agent` **coder** and **sysadmin** session identities (`id-agent-session`,
-  `id-agent-session-sysadmin`) → Microsoft Graph **Directory.Read.All**
-  (application, read-only). Lets estate work resolve principals and inspect app
-  registrations; without it `az role assignment list` prints *"Failed to query by
-  invoking Graph API"* and shows raw object ids. Note it is **directory-wide read
-  across the tenant** — broader than anything in `role-grants.json`. No write
-  permission: RBAC and app-registration changes stay in the control plane.
-- `agent` **business assistant profile** → Microsoft Graph **Mail.Read**
-  (application) on its **unified session identity** `id-agent-session-business`.
-  The business profile runs on both backends as ONE identity — attached to the ACI
-  container group *and* federated to the business k8s ServiceAccount (`fc-k8s-business`)
-  — so this single grant covers both. Read-only mailbox access for the ask-first
-  business assistant, app-only (no stored refresh token). The tenant has a single
-  mailbox, so no Exchange application access policy is scoped; add one (restricting
-  the app to a mail-enabled security group) if more mailboxes are ever added.
-  (This grant belonged to claude-runner's equivalent identity until that repo was
-  decommissioned 2026-08-05 — Entra auto-revoked the old assignment when its service
-  principal was deleted, so moving it here was a config-only cleanup.)
+There are currently no grants in `graph-grants.json`. The retired `agent`
+business profile's **Mail.Read** and coder/sysadmin profiles' **Directory.Read.All**
+declarations were removed on 2026-10-25. The applier is additive; removing these
+entries does not itself revoke live Microsoft Graph permissions.
 
 ## Templates (GitHub template repositories)
 
@@ -446,9 +400,9 @@ deploy, never a single risky one.
 ## Per-branch preview environments (opt-in)
 
 A container-app repo with `"preview": true` in `repos.json` gets an **isolated
-sandbox** so non-`main` branches can deploy without any path to prod. Today only
-`agent` opts in (claude-runner did too, until it was decommissioned 2026-08-05);
-the OIDC/routing mechanism is generic.
+sandbox** so non-`main` branches can deploy without any path to prod. No current
+repo opts in. The retired `agent` and `claude-runner` repos used this generic
+OIDC/routing mechanism; the examples below describe that historical setup.
 
 **Why a separate identity.** A GitHub OIDC token doesn't carry its branch into
 Azure role scope, so isolation can't come from the credential — it comes from a
@@ -477,7 +431,7 @@ the prod hostname — preview is reached on its default FQDN) and `enableAlerts=
 alert-rule deploy). `deploy-app` forces the app to **`--min-replicas 0`** so the
 sandbox scales to zero. Non-preview callers resolve to the prod SP/RG — byte-identical.
 
-**The caller opts in** (`agent`'s `deploy-infra.yml`/`deploy-app.yml`):
+**The caller opts in** (historically, `agent`'s `deploy-infra.yml`/`deploy-app.yml`):
 `with: { preview: true }`, a `test/**` push trigger, and the prod-only `verify`
 job is skipped on non-`main`. So **push a `test/**` branch → preview; `main` → prod.**
 deploy-app concurrency is keyed per `github.ref` so prod and preview deploys
@@ -595,10 +549,12 @@ needs both halves: the selector CNAMEs in `dns/records.platform.json` **and** th
 Autonomous coding-agent sessions authenticate to GitHub with a **GitHub App**
 (short-lived installation tokens; safer than a personal account). GitHub does
 not allow creating apps via plain REST/Bicep, so this repo codifies the maximum
-GitHub supports — the **app manifest flow**. The app is still literally named
-`claude-runner-agent` — created for that platform, and kept installed/reused by
-its successor `agent` rather than recreated, since re-running the manifest flow
-mints a brand-new app id (see `create-github-app.ps1`'s own idempotency note).
+GitHub supports — the **app manifest flow**. The `claude-runner-agent` app was
+created for that platform and reused by its now-retired successor `agent`.
+Its remaining installations and any shared consumers have not been verified;
+retiring `agent` does not authorize deleting this app or rotating its keys.
+Re-running the manifest flow mints a brand-new app id (see
+`create-github-app.ps1`'s own idempotency note).
 
 | File | Holds |
 |------|-------|
