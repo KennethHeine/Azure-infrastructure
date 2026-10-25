@@ -1,45 +1,4 @@
 {
   "$schema": "./role-grants.schema.json",
-  "grants": [
-    {
-      "comment": "agent broker: open Arc cluster-connect tunnels to the shared homelab k3s cluster on dockhost. Re-pointed 2026-08-05: the cluster was re-registered from rg-claude-runner-preview (claude-k8s-preview, a parked 2026-06-23 spike that quietly became load-bearing) to its correct home rg-homelab (dockhost-k3s) alongside the dockhost Arc machine, now that claude-runner is retired and no longer needs the shared registration. Re-registering minted a NEW OIDC issuer, so this grant's scope and every k8s federated credential moved together in one change.",
-      "identityName": "id-agent",
-      "identityResourceGroup": "rg-agent",
-      "scope": "resource",
-      "scopeResourceId": "/subscriptions/bb732a02-2579-488d-8337-a159f8b1c0a9/resourceGroups/rg-homelab/providers/Microsoft.Kubernetes/connectedClusters/dockhost-k3s",
-      "roles": [
-        "Azure Arc Enabled Kubernetes Cluster User Role"
-      ]
-    },
-    {
-      "comment": "agent sessions (coder profile): read-only estate visibility (resource state + runtime logs), matching the claude-runner and claude-coder coder profiles. Same identity on both backends (IMDS on ACI, workload-identity federation on the homelab cluster).",
-      "identityName": "id-agent-session",
-      "identityResourceGroup": "rg-agent",
-      "scope": "subscription",
-      "roles": [
-        "Reader",
-        "Log Analytics Reader"
-      ]
-    },
-    {
-      "comment": "agent coder profile: cost visibility, folded in when the cloud-sysadmin profile was retired (2026-07-25). Read-only — 'what is the estate costing' without a second profile. Every Azure CHANGE still goes through Bicep + Actions.",
-      "identityName": "id-agent-session",
-      "identityResourceGroup": "rg-agent",
-      "scope": "subscription",
-      "roles": [
-        "Cost Management Reader"
-      ]
-    },
-    {
-      "comment": "agent sysadmin profile: full read-only estate visibility — resource state, runtime logs and cost. The same read set id-agent-session holds (the two grants above). Kenneth's ask 2026-08-04: this profile absorbed the retired cloud-sysadmin role and became sysadmin for cloud AND local, which is why it was renamed from local-sysadmin to sysadmin on 2026-08-10 — the identity moved from id-agent-session-localsys to id-agent-session-sysadmin with the same grants, and the old one was deleted. Read-only — every Azure CHANGE still goes through Bicep + Actions. The matching Entra directory read is in graph-grants.json.",
-      "identityName": "id-agent-session-sysadmin",
-      "identityResourceGroup": "rg-agent",
-      "scope": "subscription",
-      "roles": [
-        "Reader",
-        "Log Analytics Reader",
-        "Cost Management Reader"
-      ]
-    }
-  ]
+  "grants": []
 }

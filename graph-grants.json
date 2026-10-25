@@ -1,38 +1,4 @@
 {
   "$schema": "./graph-grants.schema.json",
-  "grants": [
-    {
-      "comment": "agent business assistant profile — read-only mailbox access for Kenneth's own email. The ask-first business profile runs on BOTH backends (cloud ACI + homelab k8s) as ONE unified session identity: id-agent-session-business is attached to the ACI container group AND federated to the business k8s ServiceAccount (fc-k8s-business), so the same identity + RBAC serves both. The session reads mail via the Microsoft Graph API app-only, using a token minted for this managed identity (no stored refresh token). Mail.Read is an APPLICATION permission = 'read mail in all mailboxes'; the tenant currently holds a single mailbox (Kenneth's), so no Exchange application access policy is scoped (his explicit call, 2026-07-05). If more mailboxes are ever added, add a Graph application access policy (https://learn.microsoft.com/graph/auth-limit-mailbox-access) restricting this app to a mail-enabled security group containing only the allowed mailbox — a policy change, not a code change here. (This entry previously belonged to claude-runner's id-claude-runner-session-business, in rg-claude-runner — removed 2026-08-05 when that RG was decommissioned; Entra auto-revoked its live assignment the moment the identity's service principal was deleted, so this was a config-only cleanup.)",
-      "identityName": "id-agent-session-business",
-      "identityResourceGroup": "rg-agent",
-      "appRoles": [
-        {
-          "name": "Mail.Read",
-          "appRoleId": "810c84a8-4a9e-49e6-bf7d-12d183f40d01"
-        }
-      ]
-    },
-    {
-      "comment": "agent coder profile: Entra DIRECTORY READ, folded in when cloud-sysadmin was retired (2026-07-25). Read-only application permission — it lets estate work resolve principals and inspect app registrations / service principals; without it `az role assignment list` prints 'Failed to query by invoking Graph API' and shows raw object ids. NO write permission: app registrations, role assignments and RBAC changes stay in the control plane (role-grants.json / Bicep / Actions), which is the estate's hard rule.",
-      "identityName": "id-agent-session",
-      "identityResourceGroup": "rg-agent",
-      "appRoles": [
-        {
-          "name": "Directory.Read.All",
-          "appRoleId": "7ab1d382-f21e-4acd-a863-ba3e13f7da61"
-        }
-      ]
-    },
-    {
-      "comment": "agent sysadmin profile: Entra DIRECTORY READ, the same grant the coder profile received when cloud-sysadmin was retired (2026-07-25) — this profile absorbed that role on 2026-08-04 and was renamed from local-sysadmin to sysadmin on 2026-08-10 (identity id-agent-session-localsys -> id-agent-session-sysadmin, same grants, old one deleted). Read-only application permission: it lets estate work resolve principals and inspect app registrations / service principals; without it `az role assignment list` prints 'Failed to query by invoking Graph API' and shows raw object ids. NO write permission: app registrations, role assignments and RBAC changes stay in the control plane (role-grants.json / Bicep / Actions). Note this is DIRECTORY-WIDE read across the tenant, which is broader than the Azure RBAC grants in role-grants.json.",
-      "identityName": "id-agent-session-sysadmin",
-      "identityResourceGroup": "rg-agent",
-      "appRoles": [
-        {
-          "name": "Directory.Read.All",
-          "appRoleId": "7ab1d382-f21e-4acd-a863-ba3e13f7da61"
-        }
-      ]
-    }
-  ]
+  "grants": []
 }
