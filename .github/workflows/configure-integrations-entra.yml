@@ -1,5 +1,9 @@
 name: Configure KS Integrations Entra
 on:
+  pull_request:
+    paths:
+      - integrations/**
+      - .github/workflows/configure-integrations-entra.yml
   workflow_dispatch:
     inputs:
       callback_url:
@@ -8,13 +12,22 @@ on:
         type: string
 permissions:
   contents: read
-  id-token: write
 concurrency:
-  group: ks-integrations-entra
+  group: ${{ github.event_name == 'pull_request' && format('ks-integrations-entra-pr-{0}', github.event.pull_request.number) || 'ks-integrations-entra' }}
   cancel-in-progress: false
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Compile Entra declaration without Azure credentials
+        run: az bicep build --file integrations/entra.bicep --outfile "$RUNNER_TEMP/entra.json"
   configure:
-    if: github.ref == 'refs/heads/main'
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -33,7 +46,6 @@ jobs:
           test "$TENANT" = '14bc2ff7-5fd1-4ce2-a110-4f71b9a2ce41'
           DOMAIN=$(az resource show -g rg-ks-integrations -n cae-ks-integrations --resource-type Microsoft.App/managedEnvironments --api-version 2026-07-01 --query properties.defaultDomain -o tsv)
           RESOURCE="https://ca-ks-integrations.$DOMAIN/mcp"
-          az deployment group create -g rg-ks-integrations -n "entra-v2-${GITHUB_RUN_ID}" --template-file integrations/entra.bicep --parameters resourceUrl="$RESOURCE" callbackUrl="$CALLBACK_URL" bindIdentifier=false --output none
           az deployment group create -g rg-ks-integrations -n "entra-bind-${GITHUB_RUN_ID}" --template-file integrations/entra.bicep --parameters resourceUrl="$RESOURCE" callbackUrl="$CALLBACK_URL" bindIdentifier=true --query properties.outputs -o json > /tmp/entra-settings.json
           cat /tmp/entra-settings.json >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4

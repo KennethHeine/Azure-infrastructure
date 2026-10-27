@@ -9,6 +9,7 @@ param callbackUrl string
 param bindIdentifier bool = false
 var scopeId = guid(tenant().tenantId, 'ks-integrations', 'integrations.read')
 var accountingScopeId = guid(tenant().tenantId, 'ks-integrations', 'integrations.accounting')
+var timeWriteScopeId = guid(tenant().tenantId, 'ks-integrations', 'integrations.time.write')
 var suffix = uniqueString(subscription().id, resourceGroup().id)
 
 resource api 'Microsoft.Graph/applications@v1.0' = {
@@ -36,6 +37,15 @@ resource api 'Microsoft.Graph/applications@v1.0' = {
       adminConsentDescription: 'Create, update and post KS Cloud vouchers only with separate exact approvals. Does not make payments or reconcile.'
       userConsentDisplayName: 'Execute your approved KS bookkeeping actions'
       userConsentDescription: 'Create, update and post KS Cloud vouchers only with your separate exact approvals. Does not make payments or reconcile.'
+    }, {
+      id: timeWriteScopeId
+      value: 'integrations.time.write'
+      type: 'User'
+      isEnabled: true
+      adminConsentDisplayName: 'Create own KS time entries'
+      adminConsentDescription: 'Create time entries for the signed-in user. Does not edit or delete time entries or invoice.'
+      userConsentDisplayName: 'Create your own KS time entries'
+      userConsentDescription: 'Create your own time entries. Does not edit or delete time entries or invoice.'
     }]
   }
 }
@@ -53,6 +63,7 @@ resource client 'Microsoft.Graph/applications@v1.0' = {
     resourceAccess: [
       { id: scopeId, type: 'Scope' }
       { id: accountingScopeId, type: 'Scope' }
+      { id: timeWriteScopeId, type: 'Scope' }
     ]
   }]
   dependsOn: [apiPrincipal]
@@ -67,4 +78,5 @@ output oauthIssuer string = 'https://login.microsoftonline.com/${tenant().tenant
 output resource string = resourceUrl
 output scope string = '${resourceUrl}/integrations.read'
 output accountingScope string = '${resourceUrl}/integrations.accounting'
+output timeWriteScope string = '${resourceUrl}/integrations.time.write'
 output callback string = callbackUrl
