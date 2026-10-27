@@ -24,6 +24,12 @@ For every onboarded repo it creates:
 Each onboarded repo is then **self-deploying**: its own workflows build Bicep
 and deploy into its own resource group using its own SP.
 
+App-specific API/OAuth registrations, service principals, scopes, callbacks and
+app infrastructure belong in the **app repo**, deployed with its verified OIDC
+identity. This repo bootstraps that identity and the shared platform. Before
+onboarding or adopting identities, follow the
+[repository boundary and review checklist](./CLAUDE.md#app-repository-boundary-and-onboarding-review).
+
 ```
 Azure-infrastructure (this repo)
   └── SP: sp-azure-infrastructure-github

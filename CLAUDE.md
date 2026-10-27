@@ -29,6 +29,85 @@ Each onboarded repo is **self-deploying**: its own `deploy-infra` / `deploy-app`
 the service principal this repo created. The SP is Owner on `rg-<repo>` and
 nothing else.
 
+## App repository boundary and onboarding review
+
+**App-specific infrastructure and Entra configuration belong in the app repo.**
+Declare API/OAuth app registrations, their service principals, scopes, callbacks,
+runtime identities and app resources in that repo's Bicep, and deploy through
+its workflows using its verified GitHub OIDC identity. Do not routinely add an
+app folder here or use the central onboarding identity to deploy app identities.
+The existing `integrations/entra.bicep` and its central workflow are an existing
+exception to resolve separately, not a pattern for the next app.
+
+**Bootstrap is the necessary exception.** Azure-infrastructure owns the shared
+platform and creates a new repo's resource group, `sp-<repo>-github` app/SP,
+GitHub OIDC trust and deployment access (including preview equivalents when
+enabled). Approved Graph app-role grants and access to shared resources that
+the repo cannot grant itself are also bootstrap/platform work here. A new repo
+cannot create its own initial deploy identity before it has access. This exception
+does not transfer ownership of the app's API/OAuth definitions to this repo.
+Reusable workflows maintained here still check out the caller's app definitions
+and authenticate with the caller's repo identity.
+
+**Source ownership, Entra ownership and Azure RBAC are separate.** Moving Bicep
+to an app repo does not change an existing Entra object's `owners`.
+Azure **Owner** on `rg-<repo>` does not grant Microsoft Graph permissions:
+applications and service principals are tenant objects, even when the Graph
+Bicep extension is invoked through a resource-group deployment.
+
+Onboarding Step 5b currently grants `Application.ReadWrite.OwnedBy` and
+`User.Read.All` only when `EnableAuth` is true; the preview path does the same.
+`process-repos.ps1` defaults auth on for `container-app` and off for other
+templates and bare entries, unless explicitly configured. Read the actual
+repo SP's Graph app-role assignments before relying on them; config and a
+successful onboarding summary are not proof that a grant succeeded. Do not
+toggle auth or grant additional permissions merely to bypass a failed deploy.
+
+Microsoft's [OwnedBy permission reference](https://learn.microsoft.com/en-us/graph/permissions-reference#applicationreadwriteownedby)
+allows creation and management of owned apps/SPs, and tenant-wide listing of
+apps/SPs. It is not general tenant administration or authority to grant itself
+Graph permissions. With the **Microsoft Graph Bicep extension**, using an
+app-only deploy identity actually granted `Application.ReadWrite.OwnedBy`:
+
+- **New Application:** the calling deploy SP is automatically added as an owner
+  when the application is created.
+- **New ServicePrincipal:** the calling deploy SP is also automatically added
+  as an owner when that service principal is created.
+
+The [Graph Bicep maintainer confirms both ownership links](https://github.com/microsoftgraph/msgraph-bicep-types/issues/134#issuecomment-2332394543).
+The [final fix was fully deployed on 2024-11-19](https://github.com/microsoftgraph/msgraph-bicep-types/issues/134#issuecomment-2486109730).
+Automatic ownership applies **at creation only**: redeploying or adopting an
+existing application/SP does not backfill ownership. Read back both owners lists
+to verify the expected deploy SP; Application and SP are separate objects.
+
+An explicit owner step needs its own documented permissions; for example,
+[adding an Application owner](https://learn.microsoft.com/en-us/graph/api/application-post-owners?view=graph-rest-1.0)
+is not authorized by OwnedBy alone. Do not escalate permissions automatically.
+
+For **adoption of existing objects**, retain client/app IDs, application and SP
+object IDs, stable Bicep keys, scope IDs and callbacks. Inspect both owners lists
+and the intended deploy identity's effective Graph permissions before any deploy.
+If ownership or permission changes are needed, present the exact objects,
+principal and proposed changes for concrete approval first. Adoption does not
+authorize new grants, owner additions/removals, app/SP recreation, secret rotation
+or deletion. Report missing access as a separate gap; do not fall back to the
+central identity for the app deployment.
+
+**Review checklist for the next repo:**
+
+- [ ] Bootstrap only the repo's deployment access here; keep app/API/OAuth
+  definitions and app infrastructure in the app repo and name its deploy workflow.
+- [ ] Verify that workflow's OIDC identity and exact trust subject, RG access and
+  required live Graph grants; review preview identity separately if enabled.
+- [ ] Check Application and ServicePrincipal owners independently, using the
+  deploy SP's object ID; confirm automatic ownership for newly created objects
+  and check actual ownership for adopted objects. A shared appId is not enough.
+- [ ] When adopting, review the preserved IDs, scopes and complete callback list;
+  obtain concrete approval for any required ownership/permission change.
+- [ ] Review the app repo's own AGENTS.md/CLAUDE.md and README for this boundary.
+  Templates supply their own guides; empty-repo seeding only creates missing
+  guides, so this central guide does not automatically update those repos.
+
 ## Config: `repos.json`
 
 The single source of truth. Each entry is either a plain string (empty repo, no
