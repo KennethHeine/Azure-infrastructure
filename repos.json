@@ -16,7 +16,7 @@
     {
       "name": "ks-integrations",
       "template": "none",
-      "auth": false,
+      "auth": true,
       "sharedAcr": {
         "pullIdentities": [
           "id-ks-integrations"
