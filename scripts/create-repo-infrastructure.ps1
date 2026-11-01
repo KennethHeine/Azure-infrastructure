@@ -50,7 +50,11 @@ param(
     # Azure still runs only in the infra repo's OIDC workflow.
     [switch]$AzureOnly,
     [string]$OidcSubjectPrefix,
-    [string]$SettingsOutput
+    [string]$SettingsOutput,
+
+    # Split onboarding can create owned workload apps without user-directory reads.
+    [bool]$EnableApplicationManagement = $false,
+    [bool]$TrustPullRequests = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +64,9 @@ if ($AzureOnly) {
     if (-not $SettingsOutput -or $OidcSubjectPrefix -notmatch $expectedPrefix) {
         throw 'AzureOnly requires a settings output and the exact live repository OIDC prefix'
     }
+}
+if (-not $AzureOnly -and ($EnableApplicationManagement -or -not $TrustPullRequests)) {
+    throw 'Explicit Graph/OIDC options require AzureOnly onboarding'
 }
 
 # ─── Derive names from repo ──────────────────────────────────────────
@@ -144,6 +151,24 @@ if ($appId) {
 Write-Host ""
 
 # ─── Step 3: Ensure Service Principal exists ─────────────────────────
+if ($AzureOnly) {
+    # Inspect existing trust before assigning any new access to an adopted app.
+    # Never silently replace trust based only on a matching credential name.
+    $existingTrustJson = az ad app federated-credential list --id $appId --output json --only-show-errors
+    if ($LASTEXITCODE -ne 0) { throw 'Could not verify existing OIDC trust' }
+    foreach ($trust in @($existingTrustJson | ConvertFrom-Json)) {
+        $suffix = switch ($trust.name) {
+            'github-actions-main' { ':ref:refs/heads/main' }
+            'github-actions-pr' { if ($TrustPullRequests) { ':pull_request' } }
+        }
+        if (-not $suffix -or $trust.subject -ne ($OidcSubjectPrefix + $suffix) -or
+            $trust.issuer -ne 'https://token.actions.githubusercontent.com' -or
+            @($trust.audiences).Count -ne 1 -or $trust.audiences[0] -ne 'api://AzureADTokenExchange') {
+            throw 'Existing OIDC trust needs separately reviewed removal or replacement'
+        }
+    }
+}
+
 Write-Host "Step 3: Ensuring service principal exists..." -ForegroundColor Cyan
 
 $spObjectId = az ad sp list --display-name $ServicePrincipalName --query "[?appId=='$appId'].id | [0]" --output tsv --only-show-errors
@@ -315,15 +340,15 @@ Write-Host ""
 # same declarative way and needs the same two roles. process-repos.ps1 keeps
 # auth OFF by default for non-container-app entries, so this fires only on an
 # explicit opt-in in repos.json.
-if ($EnableAuth) {
-    Write-Host "Step 5b: Granting Graph app roles to the SP (Entra auth + email resolution)..." -ForegroundColor Cyan
+if ($EnableAuth -or $EnableApplicationManagement) {
+    Write-Host "Step 5b: Granting declared Graph app roles to the SP..." -ForegroundColor Cyan
 
     $graphAppId = "00000003-0000-0000-c000-000000000000"
     # App role IDs are constant across all tenants.
     $graphAppRoles = [ordered]@{
         "Application.ReadWrite.OwnedBy" = "18a4783c-866b-4cc7-a460-3d5e5662c884"
-        "User.Read.All"                 = "df021288-bdef-4463-88db-98f22de89214"
     }
+    if ($EnableAuth) { $graphAppRoles['User.Read.All'] = 'df021288-bdef-4463-88db-98f22de89214' }
 
     if (-not $spObjectId) {
         $spObjectId = az ad sp list --display-name $ServicePrincipalName `
@@ -358,21 +383,41 @@ if ($EnableAuth) {
     Write-Host ""
 }
 
+if ($EnableApplicationManagement) {
+    # This explicit split-onboarding option must not report success after a
+    # warning-only Graph failure. Verify the actual application-role grant.
+    if (-not $spObjectId) { throw 'Cannot verify application-management grant without SP object ID' }
+    $ownedByGrant = az rest --method GET `
+        --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId/appRoleAssignments" `
+        --query "value[?appRoleId=='18a4783c-866b-4cc7-a460-3d5e5662c884'] | [0].id" --output tsv --only-show-errors
+    if ($LASTEXITCODE -ne 0 -or -not $ownedByGrant) {
+        throw 'Application.ReadWrite.OwnedBy grant was not observed; bootstrap is incomplete'
+    }
+}
+
 # The split lane performs no GitHub calls and consumes no automation PAT.
 if ($AzureOnly) {
-    foreach ($credential in @(
-        @{ Name = 'github-actions-main'; Suffix = ':ref:refs/heads/main' },
-        @{ Name = 'github-actions-pr'; Suffix = ':pull_request' }
-    )) {
+    $credentials = @(@{ Name = 'github-actions-main'; Suffix = ':ref:refs/heads/main' })
+    if ($TrustPullRequests) {
+        $credentials += @{ Name = 'github-actions-pr'; Suffix = ':pull_request' }
+    }
+    foreach ($credential in $credentials) {
         $expectedSubject = $OidcSubjectPrefix + $credential.Suffix
         Add-FederatedCredential -AppId $appId -Name $credential.Name -Subject $expectedSubject -Description 'GitHub Actions OIDC'
         $verifiedCredential = $false
         for ($readAttempt = 0; $readAttempt -lt 5; $readAttempt++) {
-            $actualSubject = az ad app federated-credential list --id $appId --query "[?name=='$($credential.Name)'].subject | [0]" -o tsv --only-show-errors
-            if ($LASTEXITCODE -eq 0 -and $actualSubject -eq $expectedSubject) { $verifiedCredential = $true; break }
+            $actualTrustJson = az ad app federated-credential list --id $appId --output json --only-show-errors
+            if ($LASTEXITCODE -eq 0) {
+                $actual = @($actualTrustJson | ConvertFrom-Json | Where-Object { $_.name -eq $credential.Name })
+                if ($actual.Count -eq 1 -and $actual[0].subject -eq $expectedSubject -and
+                    $actual[0].issuer -eq 'https://token.actions.githubusercontent.com' -and
+                    @($actual[0].audiences).Count -eq 1 -and $actual[0].audiences[0] -eq 'api://AzureADTokenExchange') {
+                    $verifiedCredential = $true; break
+                }
+            }
             if ($readAttempt -lt 4) { Start-Sleep -Seconds 3 }
         }
-        if (-not $verifiedCredential) { throw "Federated credential verification failed for $($credential.Name): expected '$expectedSubject', observed '$actualSubject'" }
+        if (-not $verifiedCredential) { throw "Federated credential verification failed for $($credential.Name): issuer, audience or exact subject mismatch" }
     }
     @{
         repository = "$GitHubOrg/$GitHubRepo"

@@ -152,6 +152,31 @@ to override:
 Add a repo here and its registry access is created for you — see the shared-ACR
 section for what gets emitted and why the repo can't grant itself.
 
+### Azure-only onboarding with repository-owned configuration
+
+For a custom `template: none` repo that keeps non-secret Azure IDs in source and
+secret values in Key Vault, set `onboarding: "azure-only"`. Automatic onboarding
+skips that repo (including GitHub settings/doc seeding). It does not create the
+remote. Use `onboard-azure-only.yml` explicitly after reviewing the exact live
+OIDC prefix and intended access. The workflow emits a one-day, non-secret settings
+artifact; review and commit those IDs to the app repo yourself. No GitHub
+Variables/Secrets are written for that entry, including on future reconciliations.
+The control plane's own existing bootstrap credentials are unchanged.
+
+Azure-only entries default to **main-only** GitHub trust. `oidcPullRequests: true`
+explicitly adds PR trust; preview is unsupported. Main-only mode refuses existing
+non-main federated credentials instead of deleting them or claiming they were
+revoked. Existing automatic entries retain main + PR trust and their existing
+settings behavior. Scope and permission removals need separate review.
+
+`manageApplications: true` grants only `Application.ReadWrite.OwnedBy` for the
+app repo's own Entra definitions. Keep `auth: false` when no user lookup/Easy
+Auth is needed; `auth: true` still requests both that role and `User.Read.All`.
+These declarations are not access approval: obtain concrete confirmation before
+dispatching bootstrap, and verify actual grants and both app/SP owners. Do not
+add an active repo entry merely to prepare a design. `sharedAcr: false` avoids
+unneeded registry access for a catalog/Key Vault-only repo.
+
 ## Config: `providers.json`
 
 The subscription-level **resource providers** the estate needs (Container Apps,

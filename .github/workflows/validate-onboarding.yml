@@ -1,0 +1,26 @@
+name: Validate onboarding configuration
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'tests/**'
+      - 'repos*.json'
+      - '.github/workflows/*onboard*.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Parse all PowerShell scripts without executing mutations
+        shell: pwsh
+        run: |
+          Get-ChildItem ./scripts/*.ps1 | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }
+      - name: Exercise onboarding with offline Azure/GitHub mocks
+        shell: pwsh
+        run: ./tests/azure-only-onboarding.Tests.ps1

@@ -44,7 +44,9 @@ jobs:
           if ($entries.Count -ne 1 -or $entries[0].template -ne 'none' -or $entries[0].preview) {
             throw 'Split onboarding requires exactly one declared template-none repo without preview'
           }
-          ./scripts/create-repo-infrastructure.ps1 -GitHubRepo $env:REPOSITORY_NAME -GitHubOrg $config.gitHubOrg -Location $config.location -Template none -EnableAuth ([bool]$entries[0].auth) -AzureOnly -OidcSubjectPrefix $env:OIDC_SUBJECT_PREFIX -SettingsOutput ./onboarding-settings.json
+          . ./scripts/repo-options.ps1
+          $options = Get-RepoOnboardingOptions -Entry $entries[0]
+          ./scripts/create-repo-infrastructure.ps1 -GitHubRepo $env:REPOSITORY_NAME -GitHubOrg $config.gitHubOrg -Location $config.location -Template none -EnableAuth $options.EnableAuth -EnableApplicationManagement $options.EnableApplicationManagement -TrustPullRequests $options.TrustPullRequests -AzureOnly -OidcSubjectPrefix $env:OIDC_SUBJECT_PREFIX -SettingsOutput ./onboarding-settings.json
           if ($LASTEXITCODE -ne 0) { throw 'Azure onboarding failed' }
           ./scripts/apply-role-grants.ps1 -RepositoryName $env:REPOSITORY_NAME
           if ($LASTEXITCODE -ne 0) { throw 'Registry grants failed' }

@@ -44,6 +44,9 @@ $config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
 $gitHubOrg = if ($config.gitHubOrg) { $config.gitHubOrg } else { "KennethHeine" }
 $location = if ($config.location) { $config.location } else { "swedencentral" }
 $repos = $config.repos
+. (Join-Path $PSScriptRoot 'repo-options.ps1')
+# Validate the complete set before any provider registration or access changes.
+$repoOptions = @($repos | ForEach-Object { Get-RepoOnboardingOptions -Entry $_ })
 
 if ($repos.Count -eq 0) {
     Write-Host "No repos defined in config file. Nothing to do." -ForegroundColor Yellow
@@ -110,28 +113,22 @@ if (-not (Test-Path $onboardScript)) {
 # ─── Process each repo ───────────────────────────────────────────────
 $successCount = 0
 $failCount = 0
+$manualCount = 0
 $results = @()
 
-foreach ($repoEntry in $repos) {
+foreach ($options in $repoOptions) {
+    if ($options.AzureOnly) {
+        $manualCount++
+        Write-Host "Skipping '$($options.Name)': azure-only onboarding is manual; no GitHub settings are written." -ForegroundColor Yellow
+        $results += [PSCustomObject]@{ Repo = $options.Name; Status = 'Manual Azure-only onboarding' }
+        continue
+    }
     # Each repos.json entry is either a plain string (legacy: empty repo, no
     # template) or an object { name, template, auth }.
-    if ($repoEntry -is [string]) {
-        $repoName   = $repoEntry
-        $template   = 'none'
-        # Bare entries never get the Easy Auth Graph grants: auth is an
-        # explicit opt-in for non-container-app repos (see repos.schema.json).
-        $enableAuth = $false
-        $preview    = $false
-    } else {
-        $repoName   = $repoEntry.name
-        $template   = if ($repoEntry.template) { $repoEntry.template } else { 'none' }
-        # Default tracks the template: container-app repos scaffold Easy Auth,
-        # so auth defaults on there and off everywhere else. An explicit
-        # auth in repos.json always wins - that is how a template-none
-        # repo that builds its own infra (trading-lab) opts in.
-        $enableAuth = if ($null -ne $repoEntry.auth) { [bool]$repoEntry.auth } else { $template -eq 'container-app' }
-        $preview    = if ($null -ne $repoEntry.preview) { [bool]$repoEntry.preview } else { $false }
-    }
+    $repoName = $options.Name
+    $template = $options.Template
+    $enableAuth = $options.EnableAuth
+    $preview = $options.Preview
 
     Write-Host "=========================================" -ForegroundColor Magenta
     Write-Host "Processing: $repoName  (template: $template)" -ForegroundColor Magenta
@@ -187,6 +184,7 @@ Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Total:     $($repos.Count)" -ForegroundColor Cyan
 Write-Host "Succeeded: $successCount" -ForegroundColor Green
+Write-Host "Manual:    $manualCount" -ForegroundColor Yellow
 if ($failCount -gt 0) {
     Write-Host "Failed:    $failCount" -ForegroundColor Red
 }

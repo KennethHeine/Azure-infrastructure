@@ -25,6 +25,19 @@
             "type": "object",
             "required": ["name"],
             "additionalProperties": false,
+            "allOf": [
+              {
+                "if": { "required": ["onboarding"], "properties": { "onboarding": { "const": "azure-only" } } },
+                "then": { "required": ["template"], "properties": { "template": { "const": "none" }, "preview": { "const": false } } }
+              },
+              {
+                "if": { "anyOf": [
+                  { "required": ["manageApplications"], "properties": { "manageApplications": { "const": true } } },
+                  { "required": ["oidcPullRequests"], "properties": { "oidcPullRequests": { "const": false } } }
+                ] },
+                "then": { "required": ["onboarding"], "properties": { "onboarding": { "const": "azure-only" } } }
+              }
+            ],
             "properties": {
               "name": {
                 "type": "string",
@@ -45,6 +58,21 @@
                 "type": "boolean",
                 "default": false,
                 "description": "Create a per-branch preview environment: an isolated rg-<name>-preview + sp-<name>-preview-github (Owner of that RG only, federated to any branch) so non-main branches can deploy to a sandbox, never to prod. Default false."
+              },
+              "onboarding": {
+                "type": "string",
+                "enum": ["automatic", "azure-only"],
+                "default": "automatic",
+                "description": "azure-only entries are skipped by automatic onboarding and explicitly dispatched through onboard-azure-only.yml. Only template none without preview is supported. The app repo owns its config and guides; no GitHub Secrets/Variables are written."
+              },
+              "manageApplications": {
+                "type": "boolean",
+                "default": false,
+                "description": "Azure-only: grant Application.ReadWrite.OwnedBy to the deploy SP for owned application/SP definitions. Does not grant User.Read.All unless auth is also true. Requires concrete access approval before dispatch."
+              },
+              "oidcPullRequests": {
+                "type": "boolean",
+                "description": "Azure-only: trust pull_request in addition to main. Defaults false for azure-only, true for existing automatic entries. False refuses existing non-main credentials; it does not delete them."
               },
               "sharedAcr": {
                 "description": "Shared-registry access for this repo, applied by scripts/derive-acr-grants.ps1 (via apply-role-grants.ps1). Omit to use the default: enabled for template 'container-app', disabled otherwise. Set false to never derive grants; true to enable with defaults; or an object to override them.",
