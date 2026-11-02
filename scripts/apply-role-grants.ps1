@@ -41,6 +41,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'role-grant-helpers.ps1')
 
 # ─── Resolve config file path ────────────────────────────────────────
 if (-not $ConfigFile) {
@@ -61,11 +62,13 @@ Write-Host "Config file: $ConfigFile"
 
 $declaredGrants = @((Get-Content $ConfigFile -Raw | ConvertFrom-Json).grants)
 
-$subscriptionId = az account show --query id -o tsv
-if ($LASTEXITCODE -ne 0 -or -not $subscriptionId) {
+$accountJson = az account show --query '{id:id,tenantId:tenantId}' --output json --only-show-errors
+if ($LASTEXITCODE -ne 0 -or -not $accountJson) {
     Write-Host "::error::Could not resolve the current subscription (az login?)"
     exit 1
 }
+$account = $accountJson | ConvertFrom-Json
+$subscriptionId = $account.id
 
 # ─── Derived shared-ACR grants ───────────────────────────────────────
 # Every container-app repo needs the same boilerplate grants on the shared
@@ -94,6 +97,8 @@ if ($grants.Count -eq 0) {
     Write-Host "No grants defined. Nothing to do." -ForegroundColor Yellow
     exit 0
 }
+# Validate every selected pin before any role write, including derived grants.
+foreach ($grant in $grants) { Assert-RoleGrantContext $grant $account }
 
 Write-Host "Declared:    $($declaredGrants.Count) grant(s) in $(Split-Path $ConfigFile -Leaf)" -ForegroundColor Cyan
 Write-Host "Grants:      $($grants.Count) to ensure" -ForegroundColor Cyan
@@ -107,14 +112,13 @@ foreach ($grant in $grants) {
 
     # Resolve the principal id. Two identity kinds:
     #  - managedIdentity (default): a Microsoft.ManagedIdentity resource, via az identity show.
-    #  - servicePrincipal: an Entra SP NOT backed by a managed identity (e.g. a repo's own
-    #    sp-<repo>-github OIDC deploy identity, created via az ad app/sp during onboarding),
-    #    via az ad sp list --display-name. Not existing yet is expected either way when the
-    #    owning repo's infra/onboarding hasn't run — warn and continue, not fail.
+    #  - servicePrincipal: a pinned object ID, or one exact display-name match
+    #    for derived/legacy grants. Missing unpinned identities can legitimately
+    #    precede first onboarding; lookup errors and ambiguity must fail closed.
     if ($isServicePrincipal) {
         Write-Host "Identity $name (service principal):"
-        $principalId = az ad sp list --display-name $name --query '[0].id' -o tsv 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $principalId) {
+        $principalId = Resolve-RoleGrantServicePrincipal $grant
+        if (-not $principalId) {
             Write-Host "::warning::Service principal $name not found — its repo's onboarding (which creates sp-<repo>-github) hasn't run yet. Grant skipped; re-run onboarding afterwards."
             continue
         }
@@ -132,20 +136,11 @@ foreach ($grant in $grants) {
     # Resolve the assignment scope. 'subscription' = the whole subscription;
     # 'resource' = the literal scopeResourceId (a cross-RG resource the repo SP
     # cannot grant on itself). Schema requires scopeResourceId when resource.
-    if ($grant.scope -eq "resource") {
-        if (-not $grant.scopeResourceId) {
-            Write-Host "::error::Grant for $name has scope 'resource' but no scopeResourceId — skipping."
-            $failed = $true
-            continue
-        }
-        $scope = $grant.scopeResourceId
-    }
-    else {
-        $scope = "/subscriptions/$subscriptionId"
-    }
+    $scope = Get-RoleGrantScope $grant $subscriptionId
 
     foreach ($role in $grant.roles) {
-        $existing = az role assignment list --assignee $principalId --role $role --scope $scope --query '[0].id' -o tsv 2>$null
+        $existing = az role assignment list --assignee $principalId --role $role --scope $scope --fill-principal-name false --query '[0].id' -o tsv --only-show-errors
+        if ($LASTEXITCODE -ne 0) { throw "Could not inspect '$role' for $name; no assignment created." }
         if ($existing) {
             Write-Host "  '$role' at $($grant.scope) — already assigned" -ForegroundColor DarkGray
             continue

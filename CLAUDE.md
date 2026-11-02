@@ -211,15 +211,37 @@ The declared subscription grant gives `sp-automation-catalog-codex-cloud`
 **Reader** for Codex cloud resource inventory. This is the runtime app deployed
 by `automation-catalog`, not its `sp-automation-catalog-github` deployment SP.
 Reader covers management-plane resource reads; secret-value access remains a
-separate vault-scoped role in the app repo. The current applier resolves service
-principals by display name; before applying, confirm that the resolved object ID
-matches the verified bootstrap SP, then read back the actual subscription grant.
+separate vault-scoped role in the app repo. This grant pins the verified runtime
+SP object ID and its tenant/subscription; application/client IDs are not SP object
+IDs. Name-based grants require exactly one exact display-name match, with errors
+and ambiguity stopping application. Missing unpinned identities remain warnings
+during first onboarding. Verify the actual subscription assignment after applying.
 The four retired `agent` entries were removed after `rg-agent` was deleted on
 2026-10-25. Shared ACR grants are still derived from `repos.json` as above.
 
 `apply-role-grants.ps1` is additive: removing declarations prevents future
 re-grants but does **not** revoke existing live assignments. Remaining agent
 assignments outside the deleted RG require a separately reviewed cleanup.
+
+`ownerRepo` attaches a pinned grant to its repository lifecycle. Decommission
+revokes and reads back these grants **before** removing their declarations or
+deleting identities; a failure stops teardown with the metadata retained for a
+retry. Cleanup uses principal, role and exact scope, including orphaned assignments,
+and deletes only the matching assignment resource IDs. Onboarding, decommission,
+Add Repo and both DNS-record writers share a concurrency lock. They resolve the
+selected branch head after acquiring it, so a queued run does not use an obsolete
+event SHA. `queue: max` retains up to 100 pending runs instead of replacing the
+previous pending run; running work is not cancelled. This coordinates cooperating
+workflows, not manual Git pushes or merges. Direct `decommission-repo.ps1` use also
+performs this cleanup; configuration pruning still belongs to the workflow. A replacement
+runtime SP requires review and an explicit pin update. The Azure-only lane's
+`-RepositoryName` filter retains its existing deployment/registry-only behavior.
+
+Offline regression checks (PowerShell 7+, synthetic CLI functions; no Azure login):
+`pwsh -NoProfile -File tests/role-grants.Tests.ps1` and
+`pwsh -NoProfile -File tests/mandatory-graph-grants.Tests.ps1`;
+`python3 tests/test_role_grant_lifecycle.py` exercises the workflow's actual
+pruning shell step with synthetic manifests and a stubbed Git executable.
 
 ## Config: `graph-grants.json`
 

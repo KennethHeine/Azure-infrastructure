@@ -19,13 +19,31 @@
           },
           "identityName": {
             "type": "string",
-            "description": "Name of the identity receiving the roles — a managed identity's resource name, or (identityType 'servicePrincipal') an Entra service principal's display name, e.g. a repo's own sp-<repo>-github OIDC deploy identity."
+            "description": "Managed identity resource name, or service-principal display name. For pinned service principals this is a human-readable label; otherwise exactly one exact display-name match is required."
           },
           "identityType": {
             "type": "string",
             "enum": ["managedIdentity", "servicePrincipal"],
             "default": "managedIdentity",
-            "description": "What identityName refers to. 'managedIdentity' (default, and every grant before this field existed) = a Microsoft.ManagedIdentity/userAssignedIdentities resource, resolved via 'az identity show -g identityResourceGroup -n identityName'; identityResourceGroup is required. 'servicePrincipal' = an Entra service principal NOT backed by a managed identity resource — e.g. a repo's sp-<repo>-github deploy identity, created directly via az ad app/sp during onboarding — resolved via 'az ad sp list --display-name identityName'; identityResourceGroup does not apply and must be omitted (an Entra service principal isn't scoped to a resource group)."
+            "description": "managedIdentity (default) resolves via az identity show and requires identityResourceGroup. servicePrincipal uses principalId when pinned, otherwise one exact display-name match; identityResourceGroup must be omitted."
+          },
+          "principalId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "description": "Verified immutable service-principal object ID, never an application/client ID. Requires tenantId and subscriptionId; no name lookup or automatic replacement adoption."
+          },
+          "tenantId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          },
+          "subscriptionId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          },
+          "ownerRepo": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._-]+$",
+            "description": "Repository whose decommission revokes this pinned grant before pruning its declaration. Requires principalId."
           },
           "identityResourceGroup": {
             "type": "string",
@@ -57,6 +75,18 @@
           }
         },
         "allOf": [
+          {
+            "if": { "required": ["principalId"] },
+            "then": {
+              "required": ["identityType", "tenantId", "subscriptionId"],
+              "properties": { "identityType": { "const": "servicePrincipal" } }
+            },
+            "else": { "not": { "anyOf": [{ "required": ["tenantId"] }, { "required": ["subscriptionId"] }] } }
+          },
+          {
+            "if": { "required": ["ownerRepo"] },
+            "then": { "required": ["principalId"] }
+          },
           {
             "if": {
               "properties": { "scope": { "const": "resource" } },

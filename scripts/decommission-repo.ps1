@@ -22,8 +22,9 @@
 # Removing the entry from repos.json is handled by the decommission workflow,
 # not this script.
 #
-# Idempotent and best-effort: missing pieces are logged and skipped, so re-running
-# after a partial teardown completes cleanly.
+# Owned pinned grants must be revoked and verified first; failure stops teardown.
+# The remaining legacy teardown is best-effort: missing pieces are logged and
+# skipped so it can be re-run after partial completion.
 #
 # Usage:
 #   .\scripts\decommission-repo.ps1 -GitHubRepo "my-app"
@@ -71,6 +72,10 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "Error: Not logged in to Azure. Run 'az login' first." -ForegroundColor Red; exit 1
 }
 $global:LASTEXITCODE = 0
+
+# Direct script use must revoke declared runtime grants before deleting their
+# apps/SPs too. The workflow already does this before pruning the declarations.
+& (Join-Path $PSScriptRoot 'remove-owned-role-grants.ps1') -RepositoryName $GitHubRepo
 
 # Resolve the SP appId (may already be gone on a re-run).
 $appId = az ad app list --display-name $ServicePrincipalName --query "[0].appId" --output tsv --only-show-errors

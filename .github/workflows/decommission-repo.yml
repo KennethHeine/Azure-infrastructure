@@ -31,6 +31,12 @@ permissions:
   id-token: write
   contents: write
 
+# Hold the same lock as every repository writer and onboarding through teardown.
+concurrency:
+  group: estate-rbac-${{ github.repository }}
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   decommission:
     name: Decommission repo
@@ -51,7 +57,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
+          # Resolve the branch after waiting, rather than using the old event SHA.
+          ref: ${{ github.ref }}
           token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Revoke owned runtime role grants
+        shell: pwsh
+        env:
+          REPOSITORY_NAME: ${{ inputs.name }}
+        run: |
+          # Stop before manifest pruning or identity deletion on any failure.
+          ./scripts/remove-owned-role-grants.ps1 -RepositoryName $env:REPOSITORY_NAME
 
       - name: Remove entries from repos.json + grant configs
         shell: bash
@@ -68,21 +91,24 @@ jobs:
           # apply-graph-grants.ps1 are ADDITIVE — they never revoke — so leaving
           # a decommissioned repo's entries here would re-grant them the moment
           # a same-named repo is re-onboarded, and meanwhile they describe
-          # identities that no longer exist. (The live assignments themselves are
-          # removed by decommission-repo.ps1 Step 3d.)
+          # identities that no longer exist. Explicitly owned runtime grants were
+          # revoked above; legacy shared-ACR grants are removed by Step 3d.
           #
-          # Match how the estate names things: a repo owns the identities in
+          # Match explicit ownerRepo metadata as well as the legacy naming:
+          # a repo owns the identities in
           # rg-<name> / rg-<name>-preview, and the SPs sp-<name>-github /
           # sp-<name>-preview-github.
           for f in role-grants.json graph-grants.json; do
             [ -f "$f" ] || continue
             jq \
+              --arg ownerRepo "$NAME" \
               --arg rg        "rg-$NAME" \
               --arg rgPreview "rg-$NAME-preview" \
               --arg sp        "sp-$NAME-github" \
               --arg spPreview "sp-$NAME-preview-github" '
               .grants |= map(select(
-                (.identityResourceGroup // "") != $rg
+                ((.ownerRepo // "") | ascii_downcase) != ($ownerRepo | ascii_downcase)
+                and (.identityResourceGroup // "") != $rg
                 and (.identityResourceGroup // "") != $rgPreview
                 and (.identityName // "") != $sp
                 and (.identityName // "") != $spPreview
@@ -102,13 +128,6 @@ jobs:
             git commit -m "Decommission '$NAME': remove from repos list + grant configs"
             git push
           fi
-
-      - name: Azure Login (OIDC)
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Tear down Azure + GitHub resources
         shell: pwsh

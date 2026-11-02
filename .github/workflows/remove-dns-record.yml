@@ -31,6 +31,12 @@ on:
 permissions:
   contents: write
 
+# Serialize repository writers with onboarding and decommissioning.
+concurrency:
+  group: estate-rbac-${{ github.repository }}
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   remove:
     name: Remove record from records.app.json
@@ -40,6 +46,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
+          ref: ${{ github.ref }}
           token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
 
       - name: Remove record from dns/records.app.json
