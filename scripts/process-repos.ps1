@@ -118,17 +118,15 @@ foreach ($repoEntry in $repos) {
     if ($repoEntry -is [string]) {
         $repoName   = $repoEntry
         $template   = 'none'
-        # Bare entries never get the Easy Auth Graph grants: auth is an
-        # explicit opt-in for non-container-app repos (see repos.schema.json).
+        # Bare entries have no container-app Easy Auth setting. The Graph
+        # deployment package is mandatory in create-repo-infrastructure.ps1.
         $enableAuth = $false
         $preview    = $false
     } else {
         $repoName   = $repoEntry.name
         $template   = if ($repoEntry.template) { $repoEntry.template } else { 'none' }
-        # Default tracks the template: container-app repos scaffold Easy Auth,
-        # so auth defaults on there and off everywhere else. An explicit
-        # auth in repos.json always wins - that is how a template-none
-        # repo that builds its own infra (trading-lab) opts in.
+        # Only the container-app Easy Auth setting follows this flag. The
+        # deployment SP's standard Graph permissions cannot be disabled here.
         $enableAuth = if ($null -ne $repoEntry.auth) { [bool]$repoEntry.auth } else { $template -eq 'container-app' }
         $preview    = if ($null -ne $repoEntry.preview) { [bool]$repoEntry.preview } else { $false }
     }

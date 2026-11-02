@@ -55,13 +55,14 @@ Azure **Owner** on `rg-<repo>` does not grant Microsoft Graph permissions:
 applications and service principals are tenant objects, even when the Graph
 Bicep extension is invoked through a resource-group deployment.
 
-Onboarding Step 5b currently grants `Application.ReadWrite.OwnedBy` and
-`User.Read.All` only when `EnableAuth` is true; the preview path does the same.
-`process-repos.ps1` defaults auth on for `container-app` and off for other
-templates and bare entries, unless explicitly configured. Read the actual
+Onboarding Step 5b grants the mandatory `Application.ReadWrite.OwnedBy` and
+`User.Read.All` package to every repo deployment SP and every enabled preview SP,
+independent of template, bare entries or `auth`. The `auth` field retains only
+the container-app Easy Auth setting (`ENABLE_AUTH`); false does not opt out of
+Graph permissions. Read the actual
 repo SP's Graph app-role assignments before relying on them; config and a
 successful onboarding summary are not proof that a grant succeeded. Do not
-toggle auth or grant additional permissions merely to bypass a failed deploy.
+grant additional permissions merely to bypass a failed deploy.
 
 Microsoft's [OwnedBy permission reference](https://learn.microsoft.com/en-us/graph/permissions-reference#applicationreadwriteownedby)
 allows creation and management of owned apps/SPs, and tenant-wide listing of
@@ -130,6 +131,17 @@ default **true**) toggles Entra built-in auth. `preview` (default **false**)
 opts the repo into **per-branch preview environments** (see that section below).
 Schema: `repos.schema.json`. Onboarding is **idempotent** — re-running never
 duplicates resources.
+
+The standard Graph package is mandatory for every repo and preview deployment
+identity. `auth:false` can disable a container app's Easy Auth without changing
+that package. No existing repo entries need rewriting. At the next onboarding,
+previously auth-disabled/static/bare repos receive any missing standard grants.
+In the current main manifest, `kennethheine.com` and `homelab` were previously
+outside the opt-in package; actual live grants still require readback. Preview
+identities are affected only where preview is enabled. This does not give runtime
+identities Graph access. Script/schema/documentation-only changes do not trigger
+the current onboarding workflow; a later dispatch or watched config change does.
+That reconciliation and its persistent access changes require concrete approval.
 
 **`sharedAcr`** (optional) controls the shared-registry grants derived for the
 repo by `scripts/derive-acr-grants.ps1`. Omit it and you get the right thing:
@@ -454,7 +466,7 @@ next paragraph). That works because the central onboarding SP holds
 which lets it delegate app roles to repo SPs.
 
 So the chain is: `setup-service-principal.ps1` → onboarding SP can grant app roles
-→ onboarding grants each auth repo's SP `Application.ReadWrite.OwnedBy` → that repo's
+→ onboarding grants every repo's deployment SP `Application.ReadWrite.OwnedBy` → that repo's
 deploy creates its own Easy Auth app. The Easy Auth **token store is not enabled**
 (it requires a backing blob-storage SAS URL this template doesn't provision).
 
