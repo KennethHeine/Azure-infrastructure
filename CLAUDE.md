@@ -207,9 +207,15 @@ Repositories** after its first infra deploy). Schema:
 `role-grants.schema.json`. Two `scope`s: `subscription`, or `resource` (a
 single resource OUTSIDE the identity's repo RG, named by `scopeResourceId`).
 
-There are currently no bespoke grants in `role-grants.json`. The four retired
-`agent` entries were removed after `rg-agent` was deleted on 2026-10-25. Shared
-ACR grants for active repos are still derived from `repos.json` as above.
+The declared subscription grant gives `sp-automation-catalog-codex-cloud`
+**Reader** for Codex cloud resource inventory. This is the runtime app deployed
+by `automation-catalog`, not its `sp-automation-catalog-github` deployment SP.
+Reader covers management-plane resource reads; secret-value access remains a
+separate vault-scoped role in the app repo. The current applier resolves service
+principals by display name; before applying, confirm that the resolved object ID
+matches the verified bootstrap SP, then read back the actual subscription grant.
+The four retired `agent` entries were removed after `rg-agent` was deleted on
+2026-10-25. Shared ACR grants are still derived from `repos.json` as above.
 
 `apply-role-grants.ps1` is additive: removing declarations prevents future
 re-grants but does **not** revoke existing live assignments. Remaining agent

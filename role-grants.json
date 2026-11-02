@@ -1,4 +1,12 @@
 {
   "$schema": "./role-grants.schema.json",
-  "grants": []
+  "grants": [
+    {
+      "comment": "Subscription resource inventory for the Codex cloud runtime app deployed by automation-catalog (application uniqueName: automation-catalog-codex-cloud). This targets the runtime service principal, not sp-automation-catalog-github. Reader is management-plane read access; Key Vault secret-value access is granted separately in the app repo.",
+      "identityName": "sp-automation-catalog-codex-cloud",
+      "identityType": "servicePrincipal",
+      "scope": "subscription",
+      "roles": ["Reader"]
+    }
+  ]
 }
