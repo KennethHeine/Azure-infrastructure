@@ -22,6 +22,11 @@ permissions:
   id-token: write   # Required for OIDC federated credential
   contents: read
 
+# Serialize grant application with decommissioning.
+concurrency:
+  group: estate-rbac-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   onboard:
     name: Onboard repositories

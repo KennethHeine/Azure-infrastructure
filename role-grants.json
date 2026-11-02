@@ -5,6 +5,10 @@
       "comment": "Subscription resource inventory for the Codex cloud runtime app deployed by automation-catalog (application uniqueName: automation-catalog-codex-cloud). This targets the runtime service principal, not sp-automation-catalog-github. Reader is management-plane read access; Key Vault secret-value access is granted separately in the app repo.",
       "identityName": "sp-automation-catalog-codex-cloud",
       "identityType": "servicePrincipal",
+      "principalId": "936089ae-4f02-44f4-8f67-2dbda6ac8711",
+      "tenantId": "14bc2ff7-5fd1-4ce2-a110-4f71b9a2ce41",
+      "subscriptionId": "bb732a02-2579-488d-8337-a159f8b1c0a9",
+      "ownerRepo": "automation-catalog",
       "scope": "subscription",
       "roles": ["Reader"]
     }
