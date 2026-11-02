@@ -39,6 +39,12 @@ on:
 permissions:
   contents: write
 
+# Serialize repository writers with onboarding and decommissioning.
+concurrency:
+  group: estate-rbac-${{ github.repository }}
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   add:
     name: Add record to records.app.json
@@ -49,6 +55,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
+          ref: ${{ github.ref }}
           token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
 
       - name: Upsert record in dns/records.app.json

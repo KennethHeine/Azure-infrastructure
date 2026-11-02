@@ -22,10 +22,11 @@ permissions:
   id-token: write   # Required for OIDC federated credential
   contents: read
 
-# Serialize grant application with decommissioning.
+# Serialize grant application with repository writers and decommissioning.
 concurrency:
   group: estate-rbac-${{ github.repository }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   onboard:
@@ -35,6 +36,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          # Reconcile current declarations after any preceding writer finishes.
+          ref: ${{ github.ref }}
 
       - name: Validate required secrets
         shell: pwsh

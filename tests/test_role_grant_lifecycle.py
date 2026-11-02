@@ -13,11 +13,15 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (ROOT / ".github/workflows/decommission-repo.yml").read_text()
 
 
+def pruning_script():
+    step = WORKFLOW.split("      - name: Remove entries from repos.json + grant configs\n", 1)[1]
+    step = step.split("\n      - name:", 1)[0]
+    return textwrap.dedent(step.split("        run: |\n", 1)[1])
+
+
 class RoleGrantLifecycleTests(unittest.TestCase):
     def test_actual_pruning_step_removes_owned_and_legacy_grants_only(self):
-        step = WORKFLOW.split("      - name: Remove entries from repos.json + grant configs\n", 1)[1]
-        step = step.split("\n      - name:", 1)[0]
-        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        script = pruning_script()
         grants = [
             {"identityName": "arbitrary-runtime-name", "ownerRepo": "offline"},
             {"identityName": "sp-offline-github"},
@@ -61,14 +65,66 @@ class RoleGrantLifecycleTests(unittest.TestCase):
         script = (ROOT / "scripts/decommission-repo.ps1").read_text()
         self.assertLess(script.index("'remove-owned-role-grants.ps1'"), script.index("az ad app delete"))
 
-    def test_onboarding_and_decommission_share_a_non_cancelling_lock(self):
-        onboarding = (ROOT / ".github/workflows/onboard-repos.yml").read_text()
-        pattern = r"concurrency:\n  group: ([^\n]+)\n  cancel-in-progress: false"
-        cleanup_lock = re.search(pattern, WORKFLOW)
-        apply_lock = re.search(pattern, onboarding)
-        self.assertIsNotNone(cleanup_lock)
-        self.assertIsNotNone(apply_lock)
-        self.assertEqual(cleanup_lock.group(1), apply_lock.group(1))
+    def test_all_repository_writers_and_onboarding_share_lock_and_fresh_checkout(self):
+        workflows = {p.name: p.read_text() for p in (ROOT / ".github/workflows").glob("*.yml")}
+        writers = {name for name, source in workflows.items() if re.search(r"(?m)^\s+git push\s*$", source)}
+        self.assertEqual(writers, {"add-repo.yml", "add-dns-record.yml", "remove-dns-record.yml", "decommission-repo.yml"})
+        for name in sorted(writers | {"onboard-repos.yml"}):
+            with self.subTest(workflow=name):
+                source = workflows[name]
+                self.assertTrue("concurrency:\n  group: estate-rbac-${{ github.repository }}\n  cancel-in-progress: false\n  queue: max\n" in source, f"{name} must use the shared non-cancelling queue")
+                checkout = source.split("        uses: actions/checkout@v5\n", 1)[1].split("\n      - name:", 1)[0]
+                self.assertTrue("          ref: ${{ github.ref }}" in checkout, f"{name} must refresh its selected branch after waiting")
+
+    def test_queued_decommission_preserves_a_preceding_dns_push(self):
+        # Only local repositories: capture an old dispatch SHA, let a preceding
+        # DNS writer push, then exercise branch checkout and the actual pruning
+        # shell against a real local Git remote. No CLI/provider mocks hide push
+        # failures in this regression.
+        environment = {
+            **os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_AUTHOR_NAME": "Offline Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+            "GIT_COMMITTER_NAME": "Offline Test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
+        }
+
+        def git(*arguments, cwd=None):
+            return subprocess.run(["git", *map(str, arguments)], cwd=cwd, env=environment,
+                                  capture_output=True, text=True, check=True).stdout.strip()
+
+        with tempfile.TemporaryDirectory(prefix="queued-decommission-") as directory:
+            temporary = Path(directory)
+            remote, seed, dns, cleanup = (temporary / name for name in ("remote.git", "seed", "dns-writer", "cleanup"))
+            git("init", "--bare", "--initial-branch=main", remote)
+            git("init", "--initial-branch=main", seed)
+            (seed / "repos.json").write_text(json.dumps({"repos": ["offline", "keep"]}))
+            (seed / "role-grants.json").write_text(json.dumps({"grants": [{"ownerRepo": "offline", "identityName": "runtime"}]}))
+            (seed / "graph-grants.json").write_text(json.dumps({"grants": []}))
+            (seed / "dns").mkdir()
+            (seed / "dns/records.app.json").write_text(json.dumps({"records": []}))
+            git("add", ".", cwd=seed)
+            git("commit", "-m", "Synthetic initial state", cwd=seed)
+            old_event_sha = git("rev-parse", "HEAD", cwd=seed)
+            git("remote", "add", "origin", remote, cwd=seed)
+            git("push", "--set-upstream", "origin", "main", cwd=seed)
+
+            git("clone", "--branch", "main", remote, dns)
+            records = {"records": [{"type": "TXT", "name": "offline", "values": ["synthetic"]}]}
+            (dns / "dns/records.app.json").write_text(json.dumps(records))
+            git("add", "dns/records.app.json", cwd=dns)
+            git("commit", "-m", "Preceding DNS writer", cwd=dns)
+            git("push", cwd=dns)
+
+            git("clone", "--branch", "main", remote, cleanup)
+            # Default actions/checkout binds to the captured event SHA; an
+            # explicit github.ref instead fetches the current branch head.
+            if "          ref: ${{ github.ref }}" not in WORKFLOW:
+                git("checkout", "-B", "main", old_event_sha, cwd=cleanup)
+            result = subprocess.run(["bash", "-c", pruning_script()], cwd=cleanup,
+                                    env={**environment, "NAME": "offline"}, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(git("show", "main:role-grants.json", cwd=remote))["grants"], [])
+            self.assertEqual(json.loads(git("show", "main:repos.json", cwd=remote))["repos"], ["keep"])
+            self.assertEqual(json.loads(git("show", "main:dns/records.app.json", cwd=remote)), records)
 
 
 if __name__ == "__main__":

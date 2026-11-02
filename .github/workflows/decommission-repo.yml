@@ -31,10 +31,11 @@ permissions:
   id-token: write
   contents: write
 
-# Share the lock with onboarding so it cannot re-grant while teardown runs.
+# Hold the same lock as every repository writer and onboarding through teardown.
 concurrency:
   group: estate-rbac-${{ github.repository }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   decommission:
@@ -56,6 +57,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
+          # Resolve the branch after waiting, rather than using the old event SHA.
+          ref: ${{ github.ref }}
           token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
 
       - name: Azure Login (OIDC)

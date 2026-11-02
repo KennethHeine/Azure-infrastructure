@@ -34,6 +34,12 @@ on:
 permissions:
   contents: write
 
+# Serialize repository writers with onboarding and decommissioning.
+concurrency:
+  group: estate-rbac-${{ github.repository }}
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   add:
     name: Add repo to config
@@ -45,6 +51,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
+          ref: ${{ github.ref }}
           token: ${{ secrets.AUTOMATION_GITHUB_TOKEN }}
 
       - name: Add entry to repos.json

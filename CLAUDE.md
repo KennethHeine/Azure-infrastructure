@@ -227,9 +227,13 @@ assignments outside the deleted RG require a separately reviewed cleanup.
 revokes and reads back these grants **before** removing their declarations or
 deleting identities; a failure stops teardown with the metadata retained for a
 retry. Cleanup uses principal, role and exact scope, including orphaned assignments,
-and deletes only the matching assignment resource IDs. Onboarding and decommission
-share a concurrency lock. Direct `decommission-repo.ps1` use also performs this
-cleanup; configuration pruning still belongs to the workflow. A replacement
+and deletes only the matching assignment resource IDs. Onboarding, decommission,
+Add Repo and both DNS-record writers share a concurrency lock. They resolve the
+selected branch head after acquiring it, so a queued run does not use an obsolete
+event SHA. `queue: max` retains up to 100 pending runs instead of replacing the
+previous pending run; running work is not cancelled. This coordinates cooperating
+workflows, not manual Git pushes or merges. Direct `decommission-repo.ps1` use also
+performs this cleanup; configuration pruning still belongs to the workflow. A replacement
 runtime SP requires review and an explicit pin update. The Azure-only lane's
 `-RepositoryName` filter retains its existing deployment/registry-only behavior.
 
