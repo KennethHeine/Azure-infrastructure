@@ -60,6 +60,10 @@ or an object selecting a template:
 
 `template`: `container-app` | `static-web` | `none`. `auth` (container-app only,
 default **true**) toggles Entra built-in auth. Schema: `repos.schema.json`.
+The Graph deployment package (`Application.ReadWrite.OwnedBy` + `User.Read.All`)
+is mandatory for every repo and enabled preview SP, regardless of `auth` or
+template. The field does not provide a Graph-permission opt-out. Actual grants
+are reconciled only when onboarding runs; this source change alone grants none.
 Onboarding is **idempotent** — re-running never duplicates resources.
 
 ## Starter templates

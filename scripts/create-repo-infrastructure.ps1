@@ -297,66 +297,59 @@ $subClaimPrefix = "repo:$GitHubOrg/$GitHubRepo"   # fallback; Step 6b overrides 
 
 Write-Host ""
 
-# ─── Step 5b: Grant Graph permissions for Entra Easy Auth ────────────
-# Container-app repos with auth create their own Entra "Easy Auth" application
-# at deploy time via the Microsoft Graph Bicep extension, running as THIS repo's
-# SP. That needs two Graph app roles:
+# ─── Step 5b: Mandatory Graph package for every deployment SP ────────
+# Every repo gets these two application roles, independent of template and
+# EnableAuth. EnableAuth controls only the container-app Easy Auth setting.
+# The repo's own Bicep can use these roles for its owned Entra definitions:
 #   * Application.ReadWrite.OwnedBy — manage the auth app it owns (create it,
 #     set appRoleAssignmentRequired, assign users to it).
 #   * User.Read.All — resolve the `allowedUserEmails` param (UPN → object id)
 #     via a Microsoft.Graph/users existing lookup, so access lists can be
 #     human-readable emails instead of raw object ids. Apps that use only
 #     `allowedPrincipalIds` (object ids) never trigger a user lookup, but the
-#     grant is harmless and uniform, so it's applied to every auth repo.
+#     role is part of the standard package for every deployment SP.
 # The central onboarding SP holds AppRoleAssignment.ReadWrite.All (see
 # setup-service-principal.ps1), so it can grant these app roles here. Idempotent.
-# Any repo with auth enabled - not only container-app ones. A template-none
-# repo that builds its own infra (trading-lab) creates its Easy Auth app the
-# same declarative way and needs the same two roles. process-repos.ps1 keeps
-# auth OFF by default for non-container-app entries, so this fires only on an
-# explicit opt-in in repos.json.
-if ($EnableAuth) {
-    Write-Host "Step 5b: Granting Graph app roles to the SP (Entra auth + email resolution)..." -ForegroundColor Cyan
+Write-Host "Step 5b: Granting standard Graph app roles to the deployment SP..." -ForegroundColor Cyan
 
-    $graphAppId = "00000003-0000-0000-c000-000000000000"
-    # App role IDs are constant across all tenants.
-    $graphAppRoles = [ordered]@{
-        "Application.ReadWrite.OwnedBy" = "18a4783c-866b-4cc7-a460-3d5e5662c884"
-        "User.Read.All"                 = "df021288-bdef-4463-88db-98f22de89214"
-    }
-
-    if (-not $spObjectId) {
-        $spObjectId = az ad sp list --display-name $ServicePrincipalName `
-            --query "[?appId=='$appId'].id | [0]" --output tsv --only-show-errors
-    }
-    $graphSpId = az ad sp show --id $graphAppId --query "id" --output tsv --only-show-errors
-
-    if ($spObjectId -and $graphSpId) {
-        foreach ($role in $graphAppRoles.GetEnumerator()) {
-            $existingGrant = az rest --method GET `
-                --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId/appRoleAssignments" `
-                --query "value[?appRoleId=='$($role.Value)'] | [0].id" --output tsv --only-show-errors 2>&1
-            if ($existingGrant) {
-                Write-Host "  $($role.Key) already granted" -ForegroundColor Yellow
-            } else {
-                $grantBody = "{`"principalId`":`"$spObjectId`",`"resourceId`":`"$graphSpId`",`"appRoleId`":`"$($role.Value)`"}"
-                az rest --method POST `
-                    --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId/appRoleAssignments" `
-                    --headers "Content-Type=application/json" `
-                    --body $grantBody --only-show-errors 2>&1 | Out-Null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "  Granted $($role.Key)" -ForegroundColor Green
-                } else {
-                    Write-Host "  WARNING: Failed to grant $($role.Key) — Entra auth / email resolution may fail" -ForegroundColor Yellow
-                }
-            }
-            $global:LASTEXITCODE = 0
-        }
-    } else {
-        Write-Host "  WARNING: Could not resolve SP / Graph object IDs — skipping Graph grants" -ForegroundColor Yellow
-    }
-    Write-Host ""
+$graphAppId = "00000003-0000-0000-c000-000000000000"
+# App role IDs are constant across all tenants.
+$graphAppRoles = [ordered]@{
+    "Application.ReadWrite.OwnedBy" = "18a4783c-866b-4cc7-a460-3d5e5662c884"
+    "User.Read.All"                 = "df021288-bdef-4463-88db-98f22de89214"
 }
+
+if (-not $spObjectId) {
+    $spObjectId = az ad sp list --display-name $ServicePrincipalName `
+        --query "[?appId=='$appId'].id | [0]" --output tsv --only-show-errors
+}
+$graphSpId = az ad sp show --id $graphAppId --query "id" --output tsv --only-show-errors
+
+if ($spObjectId -and $graphSpId) {
+    foreach ($role in $graphAppRoles.GetEnumerator()) {
+        $existingGrant = az rest --method GET `
+            --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId/appRoleAssignments" `
+            --query "value[?appRoleId=='$($role.Value)'] | [0].id" --output tsv --only-show-errors 2>&1
+        if ($existingGrant) {
+            Write-Host "  $($role.Key) already granted" -ForegroundColor Yellow
+        } else {
+            $grantBody = "{`"principalId`":`"$spObjectId`",`"resourceId`":`"$graphSpId`",`"appRoleId`":`"$($role.Value)`"}"
+            az rest --method POST `
+                --url "https://graph.microsoft.com/v1.0/servicePrincipals/$spObjectId/appRoleAssignments" `
+                --headers "Content-Type=application/json" `
+                --body $grantBody --only-show-errors 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Granted $($role.Key)" -ForegroundColor Green
+            } else {
+                Write-Host "  WARNING: Failed to grant $($role.Key) — Entra auth / email resolution may fail" -ForegroundColor Yellow
+            }
+        }
+        $global:LASTEXITCODE = 0
+    }
+} else {
+    Write-Host "  WARNING: Could not resolve SP / Graph object IDs — skipping Graph grants" -ForegroundColor Yellow
+}
+Write-Host ""
 
 # The split lane performs no GitHub calls and consumes no automation PAT.
 if ($AzureOnly) {
@@ -648,41 +641,34 @@ if (-not $ghToken) {
             Write-Host "  Owner role assigned on $previewRg" -ForegroundColor Green
         }
 
-        # Easy Auth in the preview env creates its OWN Entra app via the Graph
-        # Bicep extension (running as the preview SP), so the preview SP needs the
-        # same Microsoft Graph app roles the prod SP gets in Step 5b
-        # (Application.ReadWrite.OwnedBy to manage the auth app + User.Read.All to
-        # resolve allowedUserEmails) — without OwnedBy the preview deploy fails at
-        # /resources/authApp with Authorization_RequestDenied. Only when the repo
-        # uses auth.
-        if ($EnableAuth) {
-            if (-not $previewSpId) {
-                $previewSpId = az ad sp list --display-name $previewSpName --query "[?appId=='$previewAppId'].id | [0]" --output tsv --only-show-errors
-            }
-            $pvGraphRoles = [ordered]@{
-                "Application.ReadWrite.OwnedBy" = "18a4783c-866b-4cc7-a460-3d5e5662c884"
-                "User.Read.All"                 = "df021288-bdef-4463-88db-98f22de89214"
-            }
-            $pvGraphSpId = az ad sp show --id "00000003-0000-0000-c000-000000000000" --query "id" --output tsv --only-show-errors
-            if ($previewSpId -and $pvGraphSpId) {
-                foreach ($pvRole in $pvGraphRoles.GetEnumerator()) {
-                    $pvExistingGrant = az rest --method GET `
+        # Every preview deployment SP receives the same mandatory Graph package
+        # as prod, independent of the web app's EnableAuth setting.
+        if (-not $previewSpId) {
+            $previewSpId = az ad sp list --display-name $previewSpName --query "[?appId=='$previewAppId'].id | [0]" --output tsv --only-show-errors
+        }
+        $pvGraphRoles = [ordered]@{
+            "Application.ReadWrite.OwnedBy" = "18a4783c-866b-4cc7-a460-3d5e5662c884"
+            "User.Read.All"                 = "df021288-bdef-4463-88db-98f22de89214"
+        }
+        $pvGraphSpId = az ad sp show --id "00000003-0000-0000-c000-000000000000" --query "id" --output tsv --only-show-errors
+        if ($previewSpId -and $pvGraphSpId) {
+            foreach ($pvRole in $pvGraphRoles.GetEnumerator()) {
+                $pvExistingGrant = az rest --method GET `
+                    --url "https://graph.microsoft.com/v1.0/servicePrincipals/$previewSpId/appRoleAssignments" `
+                    --query "value[?appRoleId=='$($pvRole.Value)'] | [0].id" --output tsv --only-show-errors 2>&1
+                if ($pvExistingGrant) {
+                    Write-Host "  Preview SP: $($pvRole.Key) already granted" -ForegroundColor Yellow
+                } else {
+                    $pvGrantBody = "{`"principalId`":`"$previewSpId`",`"resourceId`":`"$pvGraphSpId`",`"appRoleId`":`"$($pvRole.Value)`"}"
+                    az rest --method POST `
                         --url "https://graph.microsoft.com/v1.0/servicePrincipals/$previewSpId/appRoleAssignments" `
-                        --query "value[?appRoleId=='$($pvRole.Value)'] | [0].id" --output tsv --only-show-errors 2>&1
-                    if ($pvExistingGrant) {
-                        Write-Host "  Preview SP: $($pvRole.Key) already granted" -ForegroundColor Yellow
+                        --headers "Content-Type=application/json" --body $pvGrantBody --only-show-errors 2>&1 | Out-Null
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "  Preview SP: granted $($pvRole.Key)" -ForegroundColor Green
                     } else {
-                        $pvGrantBody = "{`"principalId`":`"$previewSpId`",`"resourceId`":`"$pvGraphSpId`",`"appRoleId`":`"$($pvRole.Value)`"}"
-                        az rest --method POST `
-                            --url "https://graph.microsoft.com/v1.0/servicePrincipals/$previewSpId/appRoleAssignments" `
-                            --headers "Content-Type=application/json" --body $pvGrantBody --only-show-errors 2>&1 | Out-Null
-                        if ($LASTEXITCODE -eq 0) {
-                            Write-Host "  Preview SP: granted $($pvRole.Key)" -ForegroundColor Green
-                        } else {
-                            Write-Host "  WARNING: preview SP grant of $($pvRole.Key) failed — preview Easy Auth / email resolution may fail" -ForegroundColor Yellow
-                        }
-                        $global:LASTEXITCODE = 0
+                        Write-Host "  WARNING: preview SP grant of $($pvRole.Key) failed — preview Easy Auth / email resolution may fail" -ForegroundColor Yellow
                     }
+                    $global:LASTEXITCODE = 0
                 }
             }
         }
