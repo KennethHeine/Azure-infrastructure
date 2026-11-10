@@ -28,6 +28,10 @@
         ],
         "cloudBuild": false
       }
+    },
+    {
+      "name": "bogstavvenner",
+      "template": "static-web"
     }
   ]
 }
