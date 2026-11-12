@@ -12,11 +12,13 @@ KennethHeine/bogstavvenner Actions run 43238631987; original ARM deployment
 
 Azure rejected the exact action with `InvalidActionOrNotAction` in control-plane
 run 43239082126: the SWA polling action is missing from its role-action catalogue.
-The supported wildcard `Microsoft.Web/locations/*operation*/read` covers regional
-operation status/results and operation metadata, including the missing action.
+Azure allows only one wildcard in an action pattern (run 43239407363), so the
+supported pattern is `Microsoft.Web/locations/*/read`. It covers regional Web
+metadata and operation status/results, including the missing SWA action.
 It does not match application configuration, publishing credentials or data APIs.
 
-`operation-status.bicep` grants only that operation-read category to the
+
+`operation-status.bicep` grants only that regional metadata/status read category to the
 verified existing deployment principal `sp-bogstavvenner-github`, object ID
 `c17e4f05-e194-449d-afbd-fadbfa06009e`. It grants no application resource inventory reads,
 resource writes, data access or rights to other identities. The dedicated
