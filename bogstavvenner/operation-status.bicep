@@ -1,5 +1,6 @@
 // SWA custom-domain PUT completes, then ARM polls a subscription/location URL.
-// RG Owner cannot read that URL. Grant only the exact missing read operation.
+// RG Owner cannot read that URL. The exact action is absent from the provider
+// catalogue, so use its narrow operation-only read pattern (no app/data writes).
 targetScope = 'subscription'
 
 @description('Verified object ID of sp-bogstavvenner-github; not the runtime or a client ID.')
@@ -12,7 +13,7 @@ resource operationStatusRole 'Microsoft.Authorization/roleDefinitions@2022-04-01
     description: 'Lets only the Bogstavvenner deployment identity poll SWA custom-domain operations outside its resource group. No resource or data writes.'
     type: 'CustomRole'
     permissions: [{
-      actions: ['Microsoft.Web/locations/staticSitesOperationStatuses/read']
+      actions: ['Microsoft.Web/locations/*operation*/read']
       notActions: []
       dataActions: []
       notDataActions: []
