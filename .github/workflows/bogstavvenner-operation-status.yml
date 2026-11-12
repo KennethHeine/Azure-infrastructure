@@ -1,0 +1,28 @@
+name: Bogstavvenner operation status access
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['bogstavvenner/operation-status.bicep', '.github/workflows/bogstavvenner-operation-status.yml']
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify pinned estate and existing app deployment identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(az account show --query id -o tsv)" = 'bb732a02-2579-488d-8337-a159f8b1c0a9'
+          test "$(az account show --query tenantId -o tsv)" = '14bc2ff7-5fd1-4ce2-a110-4f71b9a2ce41'
+          test "$(az ad sp show --id c17e4f05-e194-449d-afbd-fadbfa06009e --query displayName -o tsv)" = 'sp-bogstavvenner-github'
+      - name: Deploy only the app's missing read operation
+        run: az deployment sub create --name bogstavvenner-operation-status --location swedencentral --template-file bogstavvenner/operation-status.bicep --only-show-errors
